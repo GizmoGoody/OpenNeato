@@ -1,0 +1,166 @@
+name: Validate
+
+# This workflow lives only on the fork's "ci" branch, which is the fork's
+# default branch, so it can be started for any branch:
+#   gh workflow run validate.yml -f branch=<branch>
+#   gh run watch
+# The code under test comes from that branch. The jobs mirror the upstream
+# ci.yml, which only runs on pushes to main and on pull requests.
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to test
+        required: true
+        default: dev
+  push:
+    branches: [ci]
+
+run-name: Validate ${{ inputs.branch || github.ref_name }}
+
+permissions:
+  contents: read
+
+jobs:
+  hassfest:
+    name: hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.branch || github.ref_name }}
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    # The HACS action fetches the repository from GitHub instead of reading
+    # the checked-out files, so on a manually started run it validates the
+    # ci branch (repository-level checks), not the branch under test
+    name: HACS validation (ci branch)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: hacs/action@main
+        with:
+          category: integration
+          # Brand images ship inside the integration; topics and issues are
+          # repository settings, not code
+          ignore: brands topics issues
+          comment: false
+
+  firmware-matrix:
+    name: Resolve firmware matrix
+    runs-on: ubuntu-latest
+    outputs:
+      envs: ${{ steps.envs.outputs.envs-json }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.branch || github.ref_name }}
+
+      - name: List debug environments
+        id: envs
+        uses: ./.github/actions/list-pio-envs
+        with:
+          mode: debug
+
+  firmware:
+    name: Firmware (${{ matrix.env }})
+    runs-on: ubuntu-latest
+    needs: firmware-matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        env: ${{ fromJson(needs.firmware-matrix.outputs.envs) }}
+        include:
+          - env: c6-ota
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.branch || github.ref_name }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend (generates web_assets.h)
+        run: npm ci && npm run build
+        working-directory: frontend
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/platformio-requirements.txt
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/platforms
+            ~/.platformio/packages
+            .pio/libdeps
+          key: platformio-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install -r .github/platformio-requirements.txt
+
+      - name: Build firmware
+        run: pio run -e ${{ matrix.env }}
+
+      - name: Format check (clang-format)
+        run: python scripts/check_format.py
+
+      - name: Static analysis (clang-tidy)
+        run: pio check -e ${{ matrix.env }} --fail-on-defect=low
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.branch || github.ref_name }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Lint and format check
+        run: npm run check
+        working-directory: frontend
+
+      - name: Build (lint + typecheck + vite + embed)
+        run: npm run build
+        working-directory: frontend
+
+  flash-tool:
+    name: Flash Tool
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.branch || github.ref_name }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: flash/go.mod
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          args: ./...
+          working-directory: flash
+
+      - name: Build
+        run: go build -o openneato-flash .
+        working-directory: flash
