@@ -2620,11 +2620,18 @@ const keyOf = (hass, entityId) => hass.entities?.[entityId]?.translation_key || 
 // robot's sensors are other entities, so they are handed to the tile card as
 // attributes of the robot (already formatted, in the language and units of
 // Home Assistant), and the two raw states the tile has no use for are left out.
-const DEFAULT_STATE_CONTENT = ["state", "charging", "battery_level"];
+const DEFAULT_STATE_CONTENT = ["state", "charging", "battery"];
 const HIDDEN_ATTRIBUTES = ["robot_state", "ui_state"];
+// Home Assistant's State content picker hides an attribute called battery_level
+// (it keeps its own battery attributes out of the list), so the sensor goes by
+// another name there. The old name still works in YAML.
+const ATTRIBUTE_ALIASES = { battery_level: "battery" };
+const aliased = (key) => ATTRIBUTE_ALIASES[key] ?? key;
 
 function readouts(hass, entityId) {
-    return siblings(hass, entityId, ["sensor", "binary_sensor"]).map((e) => ({ key: keyOf(hass, e.entity_id), entityId: e.entity_id }));
+    return siblings(hass, entityId, ["sensor", "binary_sensor"]).map((e) => ({
+        key: aliased(keyOf(hass, e.entity_id)), entityId: e.entity_id,
+    }));
 }
 
 // Reused while nothing it is made of has changed, so the tile card (which
@@ -2634,7 +2641,7 @@ function withReadouts(hass, entityId, memo) {
     const stateObj = hass?.states?.[entityId];
     if (!stateObj) return hass;
     const reads = readouts(hass, entityId);
-    const parts = [stateObj, hass.formatEntityState, ...reads.map((r) => hass.states[r.entityId])];
+    const parts = [stateObj, hass.formatEntityState, hass.formatEntityAttributeName, ...reads.map((r) => hass.states[r.entityId])];
     let state = memo.state;
     if (!(memo.parts && memo.parts.length === parts.length && parts.every((p, i) => p === memo.parts[i]))) {
         const attributes = { ...stateObj.attributes };
@@ -2645,10 +2652,15 @@ function withReadouts(hass, entityId, memo) {
             attributes[r.key] = hass.formatEntityState ? hass.formatEntityState(s) : s.state;
         }
         state = { ...stateObj, attributes };
+        // The picker names an attribute by what the device calls the sensor ("WiFi signal")
+        const names = Object.fromEntries(reads.map((r) => [r.key, shortName(hass, r.entityId)]));
+        const original = hass.formatEntityAttributeName;
+        memo.formatName = (s, attribute) =>
+            s?.entity_id === entityId && attribute in names ? names[attribute] : original ? original(s, attribute) : capitalize(attribute);
         memo.parts = parts;
         memo.state = state;
     }
-    return { ...hass, states: { ...hass.states, [entityId]: state } };
+    return { ...hass, formatEntityAttributeName: memo.formatName, states: { ...hass.states, [entityId]: state } };
 }
 
 /* ── the controls and the configuration ──────────────────────────────── */
@@ -2880,7 +2892,7 @@ function featuresOf(config) {
 function tileConfigOf(config, entity, open) {
     const tile = {
         type: "tile", entity, tap_action: TOGGLE_ACTION,
-        state_content: config.state_content ?? DEFAULT_STATE_CONTENT,
+        state_content: (config.state_content ?? DEFAULT_STATE_CONTENT).map(aliased),
         features: open ? featuresOf(config) : [],
     };
     for (const key of TILE_KEYS) if (config[key] !== undefined) tile[key] = config[key];
@@ -3144,7 +3156,7 @@ function editorData(kind, config, entity) {
         data.expanded = config.expanded === true;
         data.controls = config.controls ?? [];
         data.configuration = config.configuration ?? [];
-        data.state_content = config.state_content ?? DEFAULT_STATE_CONTENT;
+        data.state_content = (config.state_content ?? DEFAULT_STATE_CONTENT).map(aliased);
         if (entity && !data.entity) data.entity = entity;
     }
     if (kind === CONTROLS_TYPE || kind === CONFIGURATION_TYPE) return { items: config.items ?? [] };
