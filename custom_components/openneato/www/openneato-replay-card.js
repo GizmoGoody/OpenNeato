@@ -922,6 +922,8 @@ class OpenNeatoReplayCard extends HTMLElement {
         const collapsible = this._collapsible;
         this._card.classList.toggle("collapsible", collapsible);
         this._summary.hidden = !collapsible;
+        // The tile card (or its stand-in) is the title; the drawer's own would repeat it
+        this._card.querySelector(".title").hidden = collapsible;
         this._drawer.hidden = !this._open;
         this._chevron.setAttribute("aria-expanded", String(this._open));
         this._chevron.setAttribute("aria-label", this._open ? "Hide the cleaning replay" : "Show the cleaning replay");
