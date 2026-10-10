@@ -327,6 +327,27 @@
     expectEqual(live, ["Distance", "Duration", "Battery"], "the figures");
   });
 
+  test("map: a floorplan of black walls on a transparent background is found, for Whole floorplan", () => hasFeaturesList(), async () => {
+    clearStage();
+    const el = mountReplay({ fit: "plan" });
+    // As the integration draws it: black walls, everything else transparent
+    const c = document.createElement("canvas");
+    c.width = 100;
+    c.height = 80;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "rgba(0, 0, 0, 1)";
+    ctx.fillRect(20, 10, 60, 4);
+    ctx.fillRect(20, 10, 4, 50);
+    const img = new Image();
+    await new Promise((resolve) => {
+      img.onload = resolve;
+      img.src = c.toDataURL("image/png");
+    });
+    const bounds = el._planContentBounds(img, { scale: 20, originX: 0, originY: 0 });
+    expect(bounds, "no floorplan found in the image");
+    expectEqual([bounds.minX, bounds.maxX].map((v) => Math.round(v * 10) / 10), [1, 4], "the floorplan's width in metres");
+  });
+
   test("speed: the button on the map remembers its choice for the next time", hasReplay, async () => {
     localStorage.removeItem("openneato-card:speed");
     clearStage();

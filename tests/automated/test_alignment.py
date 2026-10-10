@@ -180,3 +180,19 @@ async def test_finished_run_found_under_its_compressed_name(hass: HomeAssistant)
     assert runner.alignment("1791669270.jsonl.hs") == (1, -6, -3)
     assert runner.alignment("1791669270.jsonl") == (1, -6, -3)
     assert runner.alignment("4030.jsonl.hs") is None
+
+
+async def test_live_clean_starts_from_the_last_cleans_alignment(hass: HomeAssistant) -> None:
+    """Before a clean has scans enough for its own fit, the last clean's stands in."""
+    runner = lidar_runner.LidarMapRunner(hass, "entry", None, SimpleNamespace(async_add_listener=lambda *_: None, data={}))
+    runner._map = lidar_mapper.AccumulatedMap({})
+    runner._map.walls = dict(ROOM)
+    runner._map.alignments.update({"4030.jsonl": [1, -2, -1], "1791669270.jsonl": [1, -6, -3]})
+    runner._start()
+    runner._stop_timer()
+    runner._session_name = NAME
+    runner._captures = []
+    assert await runner.async_live_alignment(NAME) == (1, -6, -3)
+    # And it stands for the clean if it ends before a fit of its own
+    await runner._finish()
+    assert runner.alignment(NAME) == (1, -6, -3)
