@@ -2677,16 +2677,11 @@ function configurables(hass, entityId) {
         .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-// Through Home Assistant's own action handling, as a card's tap action does
+// A call to Home Assistant's service, with its own notice if it fails
 function performAction(host, service, entityId, data) {
-    fire(host, "hass-action", {
-        config: {
-            tap_action: {
-                action: "perform-action", perform_action: service, target: { entity_id: entityId },
-                ...(data ? { data } : {}),
-            },
-        },
-        action: "tap",
+    const [domain, name] = service.split(".");
+    Promise.resolve(host._hass.callService(domain, name, data ?? {}, { entity_id: entityId })).catch((err) => {
+        fire(host, "hass-notification", { message: `${service}: ${err?.message ?? err}` });
     });
 }
 
