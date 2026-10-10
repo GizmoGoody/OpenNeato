@@ -253,9 +253,10 @@
     clearStage();
     const second = mountReplay();
     expectEqual(second.shadowRoot.querySelector(".speed").textContent.trim(), "16×", "the speed on the next load");
-    // Round the speeds to the first again, and the choice is the first
+    // From 16, the steps are 32, 64, 128 and 256, then round to 1 again
+    const seen = [];
     await until(() => second._session && !second.shadowRoot.querySelector(".speed").disabled, "the second map to load");
-    for (let i = 0; i < 3; i++) await press(second.shadowRoot.querySelector(".speed"));
+    for (let i = 0; i < 5; i++) await press(second.shadowRoot.querySelector(".speed"));
     expectEqual(second.shadowRoot.querySelector(".speed").textContent.trim(), "1×", "after wrapping round");
     localStorage.removeItem("openneato-replay-card:speed");
   });
