@@ -608,6 +608,53 @@
     }, "the converted card");
   });
 
+  // The two cards on a real dashboard that left the editor empty, as they were saved
+  test("card editor: a card saved by the first OpenNeato card opens, its controls made features", hasFeaturesList, async () => {
+    clearStage();
+    const old = {
+      type: `custom:${CARD}`, entity: VACUUM, state_content: ["state", "charging", "battery", "wifi_signal"],
+      controls: ["start", "pause", "stop", "dock", "spot", "locate", "fan_speed"],
+      features: [{ type: "custom:openneato-replay", grid: false, height: 300, show_distance: false }],
+      grid_options: { columns: "full" },
+    };
+    const { el, saved } = await cardEditor(old);
+    expectEqual(saved[0], {
+      type: `custom:${CARD}`, entity: VACUUM, state_content: ["state", "charging", "battery", "wifi_signal"],
+      features: [
+        { type: "custom:openneato-replay", grid: false, height: 300, show_distance: false },
+        { type: "custom:openneato-controls", items: ["start", "pause", "stop", "dock", "spot", "locate"] },
+        { type: "custom:openneato-suction" },
+      ],
+      grid_options: { columns: "full" },
+    }, "the converted card");
+    expect(el.shadowRoot.querySelector("ha-alert").hidden, "the editor shows an error");
+  });
+
+  test("card editor: a replay-only card from before opens, its options made a Replay map", hasFeaturesList, async () => {
+    clearStage();
+    const old = {
+      type: `custom:${CARD}`, title: null, height: 300, session: "latest", autoplay: false, speed: 128, show_picker: true,
+      show_stats: true, rotation: 180.5, fit: "stable", floorplan: true, floorplan_opacity: 1, grid: true, trail: true,
+    };
+    const { el, saved } = await cardEditor(old);
+    expectEqual(saved[0], {
+      type: `custom:${CARD}`,
+      features: [{
+        type: "custom:openneato-replay", height: 300, session: "latest", autoplay: false, show_picker: true, show_stats: true,
+        rotation: 180.5, fit: "stable", floorplan: true, floorplan_opacity: 1, grid: true, trail: true,
+      }],
+    }, "the converted card");
+    expect(el.shadowRoot.querySelector("ha-alert").hidden, "the editor shows an error");
+  });
+
+  test("card editor: an option the tile card does not know shows its message, not an empty editor", hasFeaturesList, async () => {
+    clearStage();
+    const { el } = hosted("openneato-card-editor", { ...cardConfig, not_an_option: 1 });
+    const alert = el.shadowRoot.querySelector("ha-alert");
+    await until(() => !alert.hidden, "the error to show");
+    expect(alert.textContent.includes("not_an_option"), `the message does not name the option: ${alert.textContent}`);
+  });
+
   test("card editor: State content is offered the robot's sensors by their names, not its raw states", hasFeaturesList, async () => {
     clearStage();
     const { tileEditor } = await cardEditor(cardConfig);
