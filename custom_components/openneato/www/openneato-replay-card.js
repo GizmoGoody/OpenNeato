@@ -49,7 +49,7 @@ const MAX_FRAME_DT = 1 / 15;
 // second. 1 is true real time; a full house clean runs close to an hour, so
 // the useful range goes well past it.
 const SPEED_STEPS = [1, 2, 4, 8, 16, 32, 64, 128, 256];
-const SPEED_STORAGE_KEY = "openneato-replay-card:speed";
+const SPEED_STORAGE_KEY = "openneato-card:speed";
 // World grid the viewport snaps to. One metre swallows the usual half-metre
 // of drift in where a cleaning run ends up reaching, without wasting much of
 // the canvas on margin.
@@ -109,6 +109,44 @@ const DEFAULTS = {
     show_battery: true,
     height: 360,
 };
+
+// The Replay map feature's options as written in YAML, with their defaults.
+// Options that belong together are nested.
+const REPLAY_DEFAULTS = {
+    header: { selector: true, distance: true, duration: true, battery: true },
+    autoplay: false,
+    units: "auto",
+    height: 360,
+    fit: "stable",
+    rotation: { straighten: true, degrees: 0 },
+    floorplan: { show: true, tiled: true, opacity: 1 },
+    grid: true,
+    coverage: { trail: true, tiled: true },
+};
+
+// The YAML read into the flat values the drawing code uses
+function replayOptions(c = {}) {
+    const g = (group, key) => c[group]?.[key] ?? REPLAY_DEFAULTS[group][key];
+    return {
+        show_picker: g("header", "selector"),
+        show_distance: g("header", "distance"),
+        show_duration: g("header", "duration"),
+        show_battery: g("header", "battery"),
+        autoplay: c.autoplay ?? REPLAY_DEFAULTS.autoplay,
+        units: c.units ?? REPLAY_DEFAULTS.units,
+        height: c.height ?? REPLAY_DEFAULTS.height,
+        fit: c.fit ?? REPLAY_DEFAULTS.fit,
+        straighten: g("rotation", "straighten"),
+        rotation_degrees: Number(g("rotation", "degrees")) || 0,
+        floorplan: g("floorplan", "show"),
+        tiled_plan: g("floorplan", "tiled"),
+        floorplan_opacity: g("floorplan", "opacity"),
+        grid_lines: c.grid ?? REPLAY_DEFAULTS.grid,
+        trail: g("coverage", "trail"),
+        tiled_coverage: g("coverage", "tiled"),
+        ...(c.entry_id ? { entry_id: c.entry_id } : {}),
+    };
+}
 
 /* ── small helpers ──────────────────────────────────────────────────── */
 
@@ -375,7 +413,7 @@ class OpenNeatoReplay extends HTMLElement {
     }
 
     setConfig(config) {
-        this._config = { ...DEFAULTS, ...config };
+        this._config = { ...DEFAULTS, ...replayOptions(config) };
         this._speed = this._storedSpeed();
         this._selectedName = null;
         this._look = {
@@ -913,7 +951,7 @@ class OpenNeatoReplay extends HTMLElement {
         } catch (err) {
             if (this._session) {
                 // Whatever is on screen stays; the next tick tries again.
-                console.warn("openneato-replay-card: session list unavailable", err);
+                console.warn("openneato-card: session list unavailable", err);
             } else {
                 this._fail(`Could not list sessions\n${err.message || err}`);
             }
@@ -1138,7 +1176,7 @@ class OpenNeatoReplay extends HTMLElement {
             if (name !== this._selectedName) return;
             if (this._session) {
                 // Keep what is on screen; the chip turns stale after a minute.
-                console.warn("openneato-replay-card: live refresh failed", err);
+                console.warn("openneato-card: live refresh failed", err);
             } else {
                 this._sessionError(err);
             }
@@ -1240,7 +1278,7 @@ class OpenNeatoReplay extends HTMLElement {
             this._floorplanBounds = this._planContentBounds(img, fp);
         } catch (err) {
             // A missing plan is cosmetic — fall back to the plain background.
-            console.warn("openneato-replay-card: floorplan unavailable", err);
+            console.warn("openneato-card: floorplan unavailable", err);
             this._floorplanImg = null;
         }
     }
@@ -1572,7 +1610,7 @@ class OpenNeatoReplay extends HTMLElement {
             cx.drawImage(img, 0, 0);
             data = cx.getImageData(0, 0, c.width, c.height).data;
         } catch (err) {
-            console.warn("openneato-replay-card: cannot inspect floorplan", err);
+            console.warn("openneato-card: cannot inspect floorplan", err);
             return null;
         }
 
@@ -1701,13 +1739,10 @@ class OpenNeatoReplay extends HTMLElement {
     // and the map always comes out the same way up.
     // The upright angle alone, before the quarter turn below is folded in.
     _baseRotationDeg() {
-        const configured = this._config.rotation;
-        if (configured === "auto" || configured === undefined) {
-            const fp = this._floorplan;
-            if (fp && Number.isFinite(fp.viewRotation)) return fp.viewRotation;
-            return configured === "auto" ? 0 : Number(DEFAULTS.rotation) || 0;
-        }
-        return Number(configured) || 0;
+        const degrees = this._config.rotation_degrees || 0;
+        if (!this._config.straighten) return degrees;
+        const fp = this._floorplan;
+        return (fp && Number.isFinite(fp.viewRotation) ? fp.viewRotation : 0) + degrees;
     }
 
     _rotationDeg() {
@@ -1734,8 +1769,7 @@ class OpenNeatoReplay extends HTMLElement {
     // canvas size, so a real resize still re-fits) and taken again, once,
     // when the recording completes.
     _updateAutoQuarter(displayW, displayH, bounds) {
-        const configured = this._config.rotation;
-        if (configured !== "auto" && configured !== undefined) {
+        if (!this._config.straighten) {
             this._autoQuarter = 0;
             return;
         }
@@ -2566,7 +2600,7 @@ class OpenNeatoReplay extends HTMLElement {
 /* ── what the robot's device offers ─────────────────────────────────── */
 
 const INTEGRATION = "openneato";
-const CARD_TYPE = "openneato-replay-card";
+const CARD_TYPE = "openneato-card";
 const REPLAY_TYPE = "openneato-replay";
 const CONTROLS_TYPE = "openneato-controls";
 const SUCTION_TYPE = "openneato-suction";
@@ -2874,7 +2908,7 @@ class OpenNeatoConfiguration extends OpenNeatoFeature {
 
 // The card's only option of its own. Everything else is the tile card's.
 const OWN_KEYS = ["expanded"];
-const TOGGLE_ACTION = { action: "fire-dom-event", openneato_replay_card: "toggle" };
+const TOGGLE_ACTION = { action: "fire-dom-event", openneato_card: "toggle" };
 
 // The tile card's own configuration. A tap on the tile shows or hides the
 // features, which are left out while the card is closed.
@@ -2923,7 +2957,7 @@ class OpenNeatoCard extends HTMLElement {
         this._memo = {};
         // A tap on the tile card, or on the arrow, shows or hides the features
         this._frame.addEventListener("ll-custom", (ev) => {
-            if (ev.detail?.openneato_replay_card !== "toggle") return;
+            if (ev.detail?.openneato_card !== "toggle") return;
             ev.stopPropagation();
             this._setOpen(!this._open);
         });
@@ -2972,13 +3006,9 @@ class OpenNeatoCard extends HTMLElement {
         return this._open ? 8 : 1;
     }
 
+    // Full width, as the map needs the room; the dashboard's layout can narrow it
     getGridOptions() {
-        const { columns, min_columns, max_columns } = this._tile?.getGridOptions?.() ?? {};
-        return {
-            columns: columns ?? 12, rows: "auto",
-            ...(min_columns !== undefined ? { min_columns } : {}),
-            ...(max_columns !== undefined ? { max_columns } : {}),
-        };
+        return { columns: "full", rows: "auto", min_columns: 6 };
     }
 
     get _entityId() {
@@ -2991,7 +3021,7 @@ class OpenNeatoCard extends HTMLElement {
 
     // Whether the card is open is remembered in this browser, per robot
     get _storageKey() {
-        return `openneato-replay-card:${this._config?.entity || "robot"}`;
+        return `openneato-card:${this._config?.entity || "robot"}`;
     }
 
     _storedOpen() {
@@ -3056,49 +3086,86 @@ const select = (options, extra = {}) => ({ select: { mode: "dropdown", options: 
 const sortable = (options) => ({ select: { multiple: true, reorder: true, mode: "dropdown", options: options.map(([value, label]) => ({ value, label })) } });
 const toggle = (name, label, helper) => ({ name, label, ...(helper ? { helper } : {}), selector: { boolean: {} } });
 
-// The Replay map's options, in the order of its form
-const REPLAY_OPTIONS = [
-    "show_picker", "show_distance", "show_duration", "show_battery", "units", "height", "fit", "rotation",
-    "floorplan", "floorplan_opacity", "grid_lines", "tiled_plan", "tiled_coverage", "trail", "autoplay",
+// The Replay map's form fields, in order, and where each is kept in YAML
+const REPLAY_FIELDS = [
+    ["selector", "header", "selector"],
+    ["distance", "header", "distance"],
+    ["duration", "header", "duration"],
+    ["battery", "header", "battery"],
+    ["autoplay", null, "autoplay"],
+    ["units", null, "units"],
+    ["height", null, "height"],
+    ["fit", null, "fit"],
+    ["straighten", "rotation", "straighten"],
+    ["degrees", "rotation", "degrees"],
+    ["floorplan", "floorplan", "show"],
+    ["floorplan_tiled", "floorplan", "tiled"],
+    ["floorplan_opacity", "floorplan", "opacity"],
+    ["grid", null, "grid"],
+    ["trail", "coverage", "trail"],
+    ["coverage_tiled", "coverage", "tiled"],
 ];
+const replayDefault = (group, key) => (group ? REPLAY_DEFAULTS[group][key] : REPLAY_DEFAULTS[key]);
 
 // Each feature's form: the fields, what they show, and what is saved
 const FEATURE_FORMS = {
     // The Replay map, in the order its parts show on the card: the picker and the
     // figures beside it, the map, then the playback
     [`custom:${REPLAY_TYPE}`]: () => ({
-        schema: [
-            toggle("show_picker", "Session picker", "When hidden, the map shows the latest run, and follows a clean as it starts."),
-            toggle("show_distance", "Distance"),
-            toggle("show_duration", "Duration"),
-            toggle("show_battery", "Battery"),
-            { name: "units", label: "Units", required: true, selector: select([["auto", "Auto"], ["metric", "Metric"], ["imperial", "US customary"]]) },
-            { name: "height", label: "Height", selector: { number: { mode: "box", min: 120, max: 1200, step: 10, unit_of_measurement: "px" } } },
-            {
-                name: "fit", label: "Framing", required: true,
-                selector: select([["stable", "Stable between cleanings"], ["plan", "Whole floorplan"], ["session", "This session only"]]),
-            },
-            {
-                // Any other angle can be set in YAML
-                name: "rotation", label: "Rotation", required: true,
-                selector: select([["auto", "Straighten against the walls"], ["0", "0°"], ["90", "90°"], ["180", "180°"], ["270", "270°"]]),
-            },
-            toggle("floorplan", "Floorplan"),
-            { name: "floorplan_opacity", label: "Floorplan opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } },
-            toggle("grid_lines", "Grid lines"),
-            toggle("tiled_plan", "Tiled floorplan"),
-            toggle("tiled_coverage", "Tiled coverage and trail"),
-            toggle("trail", "Trail"),
-            toggle("autoplay", "Autoplay"),
-        ],
-        data: (c) => Object.fromEntries(REPLAY_OPTIONS.map((key) => [key, c[key] ?? DEFAULTS[key]])),
-        // Only what differs from the defaults is written
+        schema: (c) => {
+            const floorplan = c.floorplan?.show ?? REPLAY_DEFAULTS.floorplan.show;
+            const straighten = c.rotation?.straighten ?? REPLAY_DEFAULTS.rotation.straighten;
+            return [
+                toggle("selector", "Session selector", "When hidden, the map shows the latest run, and follows a clean as it starts."),
+                toggle("distance", "Distance"),
+                toggle("duration", "Duration"),
+                toggle("battery", "Battery"),
+                toggle("autoplay", "Autoplay"),
+                { name: "units", label: "Units", required: true, selector: select([["auto", "Auto"], ["metric", "Metric"], ["imperial", "US customary"]]) },
+                { name: "height", label: "Height", selector: { number: { mode: "box", min: 120, max: 1200, step: 10, unit_of_measurement: "px" } } },
+                {
+                    name: "fit", label: "Framing", required: true,
+                    selector: select([["stable", "Stable between cleanings"], ["plan", "Whole floorplan"], ["session", "This session only"]]),
+                },
+                toggle("straighten", "Straighten against the walls"),
+                {
+                    name: "degrees", label: "Rotation",
+                    helper: straighten ? "Added to the straightened angle." : "The map's angle.",
+                    selector: { number: { mode: "box", min: -360, max: 360, step: 0.5, unit_of_measurement: "°" } },
+                },
+                toggle("floorplan", "Floorplan"),
+                // They do nothing without the floorplan
+                ...(floorplan ? [
+                    toggle("floorplan_tiled", "Tiled floorplan"),
+                    { name: "floorplan_opacity", label: "Floorplan opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } },
+                ] : []),
+                toggle("grid", "Background grid"),
+                toggle("trail", "Trail"),
+                toggle("coverage_tiled", "Tiled coverage and trail"),
+            ];
+        },
+        data: (c) => Object.fromEntries(REPLAY_FIELDS.map(([field, group, key]) => [
+            field, (group ? c[group]?.[key] : c[key]) ?? replayDefault(group, key),
+        ])),
+        // Only what differs from the defaults is written, nested where it belongs,
+        // and a group left with nothing in it is removed
         save: (v, c) => {
             const out = { ...c };
-            for (const [key, value] of Object.entries(v)) {
-                const normal = key === "rotation" && value !== "auto" && Number.isFinite(Number(value)) ? Number(value) : value;
-                if (normal === undefined || normal === "" || String(normal) === String(DEFAULTS[key])) delete out[key];
-                else out[key] = normal;
+            for (const [field, group, key] of REPLAY_FIELDS) {
+                let value = v[field];
+                if (field === "degrees" || field === "height") value = value === undefined || value === "" ? undefined : Number(value);
+                const fallback = replayDefault(group, key);
+                const unchanged = value === undefined || value === "" || String(value) === String(fallback);
+                if (!group) {
+                    if (unchanged) delete out[key];
+                    else out[key] = value;
+                    continue;
+                }
+                const next = { ...(out[group] ?? {}) };
+                if (unchanged) delete next[key];
+                else next[key] = value;
+                if (Object.keys(next).length) out[group] = next;
+                else delete out[group];
             }
             return out;
         },
