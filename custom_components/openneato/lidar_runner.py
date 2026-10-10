@@ -361,7 +361,13 @@ class LidarMapRunner:
         """
         if not self._map:
             return None
-        return self._map.alignments.get(session_name)
+        # The bridge records a run as <start>.jsonl and, once it ends,
+        # compresses it to <start>.jsonl.hs. The alignment is stored under the
+        # name the run was recorded with.
+        found = self._map.alignments.get(session_name)
+        if found is None and session_name.endswith(".hs"):
+            found = self._map.alignments.get(session_name[: -len(".hs")])
+        return found
 
     async def async_live_alignment(self, session_name: str) -> tuple[int, int, int] | None:
         """How the run being recorded fits the map so far, from its scans to date.
