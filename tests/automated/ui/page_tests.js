@@ -121,13 +121,13 @@
 
   // The replay as a tile card gives it to its feature: configured, then given
   // hass and the robot
-  function mountReplay(config = {}) {
+  function mountReplay(config = {}, into = stage()) {
     // The replay feature, or on an older branch the replay-only card
     const el = document.createElement(["openneato-replay", "openneato-replay-card"].find((t) => customElements.get(t)));
     el.setConfig({ type: "custom:openneato-replay", height: 240, ...config });
     el.context = { entity_id: VACUUM };
     el.hass = hass();
-    stage().append(el);
+    into.append(el);
     follow(el);
     return el;
   }
@@ -260,6 +260,33 @@
     await until(() => labelled._session && statsText(labelled).includes("Duration"), "the names to show");
   });
 
+  test("map: the live badge sits on the map, in the corner chosen", hasFeaturesList, async () => {
+    clearStage();
+    const standard = mountReplay();
+    const badge = standard.shadowRoot.querySelector(".stage > button.live");
+    expect(badge, "the live badge is not on the map");
+    expect(!standard.shadowRoot.querySelector(".controls button.live"), "the live badge is still in the controls row");
+    expect(badge.classList.contains("bottom_right"), "not bottom right by default");
+    const top = mountReplay({ live_position: "top_left" });
+    expect(top.shadowRoot.querySelector(".stage > button.live").classList.contains("top_left"), "not where it was put");
+  });
+
+  test("map: on a narrow card the controls row stays inside the card", hasFeaturesList, async () => {
+    clearStage();
+    const box = document.createElement("div");
+    box.style.width = "280px";
+    stage().append(box);
+    const el = mountReplay({}, box);
+    await until(() => el._session, "the session to load");
+    const row = el.shadowRoot.querySelector(".controls");
+    const edge = row.getBoundingClientRect().right;
+    for (const child of row.children) {
+      if (!visible(child)) continue;
+      const right = child.getBoundingClientRect().right;
+      expect(right <= edge + 0.5, `${child.className || child.tagName} ends at ${right}, past the row's edge at ${edge}`);
+    }
+  });
+
   test("speed: the button on the map remembers its choice for the next time", hasReplay, async () => {
     localStorage.removeItem("openneato-card:speed");
     clearStage();
@@ -328,6 +355,16 @@
     await tileReady(el);
     await until(() => tileText(el).includes("-55") && tileText(el).includes("29"), "the chosen sensors");
     expect(!CHARGING.test(tileText(el).replace("Test Robot", "")), "a sensor that was not chosen is shown");
+  });
+
+  test("card: a sensor with nothing to show is left out of the tile, but still offered in State content", hasFeaturesList, async () => {
+    clearStage();
+    forgetOpenState();
+    const el = mountCard({ entity: VACUUM, state_content: ["state", "error_message", "battery"] });
+    await tileReady(el);
+    expect(!("error_message" in el._tileHass().states[VACUUM].attributes), "the empty error message reaches the tile");
+    const { tileEditor } = await cardEditor(cardConfig);
+    expect("error_message" in tileEditor.hass.states[VACUUM].attributes, "the State content picker does not offer the error message");
   });
 
   test("card: the robot's sensors reach the tile as attributes, without the raw states, and are reused", hasCard, async () => {
@@ -628,7 +665,7 @@
     clearStage();
     const { form } = await featureEditor(REPLAY);
     expectEqual(names(form.schema), [
-      "selector", "distance", "duration", "battery", "hide_labels", "autoplay", "units", "height", "fit", "straighten", "degrees",
+      "selector", "distance", "duration", "battery", "hide_labels", "autoplay", "units", "height", "fit", "live_position", "straighten", "degrees",
       "floorplan", "floorplan_tiled", "floorplan_opacity", "grid", "trail", "coverage_tiled",
     ], "the fields");
     const label = (name) => form.computeLabel(flat(form.schema).find((i) => i.name === name));
@@ -664,7 +701,7 @@
     clearStage();
     const { form } = await featureEditor(REPLAY);
     const layout = flat(form.schema).map((i) => (i.type === "divider" ? "|" : i.name)).join(" ");
-    expectEqual(layout, "selector distance duration battery hide_labels | autoplay units height fit | straighten degrees | "
+    expectEqual(layout, "selector distance duration battery hide_labels | autoplay units height fit live_position | straighten degrees | "
       + "floorplan floorplan_tiled floorplan_opacity | grid | trail coverage_tiled", "the fields and dividers");
     await until(() => form.shadowRoot?.querySelector("ha-form-divider"), "a divider on the form");
   });

@@ -170,6 +170,8 @@ def _set_up_robot(hass: HomeAssistant) -> None:
     add("binary_sensor", "charging", "on", "Charging", device_class="battery_charging")
     add("sensor", "wifi_signal", "-55", "WiFi signal", unit_of_measurement="dBm", device_class="signal_strength")
     add("sensor", "uptime", "29726", "Uptime", unit_of_measurement="s")
+    # No error: the robot's error message is empty
+    add("sensor", "error_message", "", "Error message")
     add("switch", "eco_mode", "off", "Eco mode")
     add("switch", "stealth_led", "on", "Stealth LED")
     add("switch", "schedule_monday_1_enabled", "off", "Schedule Monday 1 enabled")
