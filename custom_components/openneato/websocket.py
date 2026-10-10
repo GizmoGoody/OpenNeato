@@ -191,7 +191,16 @@ async def ws_get_session(
 
     domain_data = hass.data.setdefault(DOMAIN, {})
     cache: dict[tuple[str, str], dict[str, Any]] = domain_data.setdefault(CACHE_KEY, {})
+    runner = data.get("mapper")
     cached = cache.get((entry_id, name))
+    # A run merged after it was cached (the card fetches the moment a clean ends,
+    # the map merges it a little later) was cached in the robot's frame: parse
+    # it again now that its alignment is known.
+    if cached is not None and runner is not None:
+        known = runner.alignment(name)
+        if list(known or ()) != list(cached.get("alignment") or ()):
+            cache.pop((entry_id, name), None)
+            cached = None
     if cached is not None:
         connection.send_result(
             msg["id"],
@@ -219,9 +228,11 @@ async def ws_get_session(
         connection.send_error(msg["id"], "fetch_failed", str(err))
         return
 
-    # Serve the run in the map's frame, not the robot's frame of the day.
-    runner = data.get("mapper")
+    # Serve the run in the map's frame, not the robot's frame of the day. A run
+    # still recording has not been merged, so it gets its fit so far.
     align = runner.alignment(name) if runner is not None else None
+    if align is None and runner is not None and was_recording:
+        align = await runner.async_live_alignment(name)
 
     # Coverage-grid construction is CPU-bound; keep it off the event loop.
     try:
@@ -252,7 +263,7 @@ async def ws_get_session(
         if not was_recording:
             if len(cache) >= _CACHE_MAX:
                 cache.pop(next(iter(cache)))
-            cache[(entry_id, name)] = parsed
+            cache[(entry_id, name)] = {**parsed, "alignment": list(align) if align else None}
 
     connection.send_result(
         msg["id"],

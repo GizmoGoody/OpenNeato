@@ -26,8 +26,10 @@ from datetime import timedelta
 
 from .const import DOMAIN
 from .lidar_mapper import (
+    MERGE_MIN_OVERLAP,
     plan_calibration,
     AccumulatedMap,
+    align_to_reference,
     build_session_grids,
     parse_pose,
     render_plan,
@@ -48,6 +50,11 @@ MIN_ROTATION_FRACTION = 0.6
 MAX_MOVE_DURING_SCAN_M = 0.12
 MAX_TURN_DURING_SCAN_DEG = 25.0
 MIN_CAPTURES = 60            # below this a run is too thin to be worth merging
+# While a run is recording it has not been merged yet, so its alignment onto the
+# map is worked out from its scans so far: once enough of them are in, and then
+# at most this often, since fitting is CPU-bound.
+LIVE_ALIGN_MIN_CAPTURES = 20
+LIVE_ALIGN_EVERY = 60.0      # seconds
 BYTES_PER_POSE = 48          # firmware writes ~48 bytes per snapshot, every 2 s
 MAX_INTERVAL = 12.0
 
@@ -91,6 +98,9 @@ class LidarMapRunner:
         self._health_start = 0.0
         self._health_ref: dict[str, Any] | None = None
         self._session_name: str | None = None
+        self._live_align: tuple[int, int, int] | None = None
+        self._live_align_at = 0.0
+        self._live_align_busy = False
         self.last_report: dict[str, Any] = {}
 
     async def async_load(self) -> None:
@@ -134,6 +144,8 @@ class LidarMapRunner:
         # frame as the map. Captured at the start because by the time the run
         # ends the robot has stopped reporting it as recording.
         self._session_name = (self._health_ref or {}).get("name")
+        self._live_align = None
+        self._live_align_at = 0.0
         self._start_timer()
         _LOGGER.info("LIDAR mapping: collection started")
 
@@ -263,6 +275,8 @@ class LidarMapRunner:
         self._collecting = False
         self._stop_timer()
         captures, self._captures = self._captures, []
+        # From here the merged alignment, if there is one, takes over
+        self._live_align = None
         if len(captures) < MIN_CAPTURES:
             _LOGGER.info(
                 "LIDAR mapping: only %d captures, too thin to merge", len(captures)
@@ -343,6 +357,42 @@ class LidarMapRunner:
         if not self._map:
             return None
         return self._map.alignments.get(session_name)
+
+    async def async_live_alignment(self, session_name: str) -> tuple[int, int, int] | None:
+        """How the run being recorded fits the map so far, from its scans to date.
+
+        A run is merged, and its alignment stored, only when it ends. Until then
+        the replay needs this to draw the live path in the map's frame rather
+        than the robot's frame of the day, which can be a quarter turn round
+        after the robot re-zeroes. Worked out at most once a minute, off the
+        event loop, and only kept when it fits as well as a merge requires.
+        """
+        if not self._collecting or session_name != self._session_name or not self._map or not self._map.walls:
+            return None
+        now = time.monotonic()
+        if self._live_align_busy or now - self._live_align_at < LIVE_ALIGN_EVERY:
+            return self._live_align
+        captures = self._drop_slow_scans(list(self._captures))
+        if len(captures) < LIVE_ALIGN_MIN_CAPTURES:
+            return self._live_align
+        self._live_align_busy = True
+        self._live_align_at = now
+        try:
+            walls, _floor = await self.hass.async_add_executor_job(
+                build_session_grids, [c[:4] for c in captures]
+            )
+            quarter, dx, dy, overlap = await self.hass.async_add_executor_job(
+                align_to_reference, walls, self._map.walls
+            )
+        finally:
+            self._live_align_busy = False
+        _LOGGER.debug(
+            "LIDAR mapping: live fit of %s is %d deg and (%d, %d) cells, %.0f%% overlap",
+            session_name, quarter * 90, dx, dy, 100 * overlap,
+        )
+        if overlap >= MERGE_MIN_OVERLAP:
+            self._live_align = (quarter, dx, dy)
+        return self._live_align
 
     def view_rotation(self, user_offset: float = 0.0) -> float:
         """Rotation that stands the map upright, plus the user's offset."""
