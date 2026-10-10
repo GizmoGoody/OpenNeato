@@ -1,6 +1,11 @@
 /*
- * OpenNeato replay card
+ * OpenNeato card
  *
+ * A tile card for the OpenNeato robot, with tile features under it: the replay
+ * of a cleaning session (below), the robot's controls, and its configuration.
+ * A tap on the tile shows or hides them; nothing is loaded while they are hidden.
+ *
+ * The replay
  * Plays a cleaning session back on a canvas at display refresh rate, the way
  * the robot's own web UI does. The rendering is a port of
  * frontend/src/views/history/helpers.ts::renderMap and the playback loop is a
@@ -21,9 +26,6 @@ const MAP_PAD = 8;
 // period. The reference plan works out at a period of 3 px with a 1 px gutter,
 // so a third; a quarter reads the same and leaves more colour in the square.
 const GRID_GUTTER_RATIO = 0.28;
-// Floor for `height: fill`, so a short column cannot squeeze the map to
-// nothing.
-const FILL_MIN_HEIGHT = 220;
 // Cell size to fall back on before a session has loaded. The robot maps at
 // 5 cm and so does lidar_mapper.CELL_M.
 const DEFAULT_CELL_M = 0.05;
@@ -100,8 +102,14 @@ const DEFAULTS = {
     // "session" — raw cleaned-area bounds; tightest, but the view shifts and
     //             rescales from one cleaning to the next.
     fit: "stable",
+    // The session picker. Hidden, the map shows the latest run (and follows a
+    // clean as it starts), unless `session` pins one.
     show_picker: true,
-    show_stats: true,
+    // The three figures beside the picker. `show_stats: false` (the old
+    // single switch) still turns all three off.
+    show_distance: true,
+    show_duration: true,
+    show_battery: true,
     height: 360,
     session: "latest",
 };
@@ -291,7 +299,7 @@ class Session {
 
 /* ── the card ───────────────────────────────────────────────────────── */
 
-class OpenNeatoReplayCard extends HTMLElement {
+class OpenNeatoReplay extends HTMLElement {
     constructor() {
         super();
         this.attachShadow({ mode: "open" });
@@ -359,7 +367,16 @@ class OpenNeatoReplayCard extends HTMLElement {
     /* ---- Lovelace plumbing ---- */
 
     static getStubConfig() {
-        return { type: "custom:openneato-replay-card" };
+        return { type: "custom:openneato-replay" };
+    }
+
+    static getConfigElement() {
+        return document.createElement("openneato-editor");
+    }
+
+    // Tile features are given the entity they sit under
+    set context(context) {
+        this._context = context;
     }
 
     setConfig(config) {
@@ -374,30 +391,6 @@ class OpenNeatoReplayCard extends HTMLElement {
             tiles: this._config.tiled_coverage ?? master,
         };
         this._buildDom();
-    }
-
-    // Make the wrapper Home Assistant puts around this card stretch.
-    //
-    // `height: fill` is useless on its own: the card sits inside a `hui-card`
-    // that sizes to its content, so asking for 100% of an auto height gives
-    // back the content height. Styling that wrapper from the dashboard does
-    // not work either — `stack-in-card` renders its children through a
-    // `hui-vertical-stack-card`, which puts the wrapper a second shadow root
-    // down, and CSS does not cross shadow boundaries. Reaching one level out
-    // from here is the only way left, so keep it to exactly that: set flex on
-    // the immediate parent and touch nothing else.
-    _stretchWrapper() {
-        const wrapper = this.parentElement;
-        if (!wrapper) return;
-        wrapper.style.flex = "1 1 auto";
-        wrapper.style.minHeight = "0";
-        wrapper.style.display = "flex";
-        wrapper.style.flexDirection = "column";
-    }
-
-    getCardSize() {
-        const h = Number(this._config.height);
-        return Math.ceil((Number.isFinite(h) ? h : DEFAULTS.height) / 50) + 1;
     }
 
     // Home Assistant calls this on every state change. It only stores the
@@ -418,9 +411,6 @@ class OpenNeatoReplayCard extends HTMLElement {
     }
 
     connectedCallback() {
-        // setConfig runs before the card is in the tree, so the wrapper may not
-        // have existed yet; do it again now that it certainly does.
-        if (this._config && this._config.height === "fill") this._stretchWrapper();
         if (this._canvas) this._observeResize();
         document.addEventListener("visibilitychange", this._onVisibilityBound);
         this._ensurePoll();
@@ -445,18 +435,24 @@ class OpenNeatoReplayCard extends HTMLElement {
         const root = this.shadowRoot;
         root.innerHTML = `
             <style>
+                /* A tile feature: the tile card is the frame */
                 ha-card {
                     display: flex;
                     flex-direction: column;
                     overflow: hidden;
+                    background: none;
+                    box-shadow: none;
+                    border: none;
+                    border-radius: 0;
                 }
+                :host { display: block; }
+                .stats:empty { display: none; }
                 /* Several elements below set their own display, which would
                    otherwise beat the hidden attribute. */
                 [hidden] {
                     display: none !important;
                 }
-                /* One row: title (only if configured), then the session
-                   picker, then the stats. The stats scroll inside their own
+                /* One row: the session picker, then the stats. The stats scroll inside their own
                    box rather than wrapping, so the header stays one line at
                    any width. */
                 .head {
@@ -465,21 +461,6 @@ class OpenNeatoReplayCard extends HTMLElement {
                     gap: 12px;
                     padding: 12px 16px 8px;
                     flex-wrap: nowrap;
-                }
-                .title {
-                    font-size: 1.1rem;
-                    font-weight: 500;
-                    color: var(--primary-text-color);
-                    flex: 0 1 auto;
-                    min-width: 0;
-                    white-space: nowrap;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                }
-                /* An empty title is the common config — collapse it so the
-                   picker really is the first thing on the row. */
-                .title:empty {
-                    display: none;
                 }
                 select {
                     background: var(--secondary-background-color);
@@ -692,7 +673,6 @@ class OpenNeatoReplayCard extends HTMLElement {
             </style>
             <ha-card>
                 <div class="head">
-                    <div class="title">Cleaning replay</div>
                     <select class="picker" aria-label="Cleaning session"></select>
                     <button class="del" title="Delete this session" aria-label="Delete this session" disabled>
                         <svg viewBox="0 0 24 24"><path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
@@ -735,28 +715,11 @@ class OpenNeatoReplayCard extends HTMLElement {
         this._scrub = root.querySelector(".scrub");
         this._liveBtn = root.querySelector(".live");
 
-        // `height: fill` lets the map grow to whatever room the column gives
-        // it, instead of pinning a pixel count that has to be re-guessed every
-        // time a card next to it gains a row. The canvas already watches its
-        // own box through a ResizeObserver, so growing the stage is all that
-        // is needed for the map to re-fit itself.
-        if (this._config.height === "fill") {
-            this.style.height = "100%";
-            this._card.style.height = "100%";
-            this._stage.style.flex = "1 1 0";
-            this._stage.style.minHeight = `${FILL_MIN_HEIGHT}px`;
-            this._stretchWrapper();
-        } else {
-            this._stage.style.height = `${Number(this._config.height) || DEFAULTS.height}px`;
-        }
+        this._stage.style.height = `${Number(this._config.height) || DEFAULTS.height}px`;
         this._picker.hidden = !this._config.show_picker;
         // The delete button acts on the picker's selection, so it follows it.
         // Set `show_picker: false` to hide both.
         this._delBtn.hidden = !this._config.show_picker;
-        this._statsEl.hidden = !this._config.show_stats;
-        if (this._config.title !== undefined) {
-            root.querySelector(".title").textContent = this._config.title;
-        }
 
         this._picker.addEventListener("change", () => {
             // A manual pick is pinned: list refreshes must not pull the user
@@ -1306,7 +1269,9 @@ class OpenNeatoReplayCard extends HTMLElement {
     }
 
     _renderStats() {
-        if (!this._statsEl || !this._config.show_stats || !this._session) return;
+        if (!this._statsEl || !this._session) return;
+        const legacyOff = this._config.show_stats === false;
+        const show = (key) => !legacyOff && this._config[key] !== false;
         const s = this._session.summary || {};
         const info = this._session.session || {};
         const units = this._units;
@@ -1327,20 +1292,26 @@ class OpenNeatoReplayCard extends HTMLElement {
             // Only what is known while recording — the summary (area,
             // distance, end battery) is written when the clean ends.
             const since = (Date.now() - this._liveSince) / 1000;
-            bits.push(`<span>Duration <b>${formatClock(this._session.duration + since)}</b></span>`);
-            if (info.battery !== undefined) bits.push(`<span>Battery <b>${info.battery}%</b></span>`);
-            const recharges = this._session.recharges.length;
-            if (recharges > 0) bits.push(`<span>Recharges <b>${recharges}</b></span>`);
+            if (show("show_duration")) {
+                bits.push(`<span>Duration <b>${formatClock(this._session.duration + since)}</b></span>`);
+            }
+            if (show("show_battery")) {
+                if (info.battery !== undefined) bits.push(`<span>Battery <b>${info.battery}%</b></span>`);
+                const recharges = this._session.recharges.length;
+                if (recharges > 0) bits.push(`<span>Recharges <b>${recharges}</b></span>`);
+            }
         } else {
-            if (s.distanceTraveled) {
+            if (s.distanceTraveled && show("show_distance")) {
                 bits.push(`<span>Distance <b>${formatDistance(s.distanceTraveled, units, locale)}</b></span>`);
             }
             const duration = s.duration || this._session.duration;
-            if (duration) bits.push(`<span>Duration <b>${formatClock(duration)}</b></span>`);
-            if (s.batteryStart !== undefined && s.batteryEnd !== undefined) {
-                bits.push(`<span>Battery <b>${s.batteryStart}% → ${s.batteryEnd}%</b></span>`);
+            if (duration && show("show_duration")) bits.push(`<span>Duration <b>${formatClock(duration)}</b></span>`);
+            if (show("show_battery")) {
+                if (s.batteryStart !== undefined && s.batteryEnd !== undefined) {
+                    bits.push(`<span>Battery <b>${s.batteryStart}% → ${s.batteryEnd}%</b></span>`);
+                }
+                if (s.recharges) bits.push(`<span>Recharges <b>${s.recharges}</b></span>`);
             }
-            if (s.recharges) bits.push(`<span>Recharges <b>${s.recharges}</b></span>`);
         }
         this._statsEl.innerHTML = bits.join("");
     }
@@ -1579,7 +1550,7 @@ class OpenNeatoReplayCard extends HTMLElement {
     /* ---- rendering (port of helpers.ts::renderMap) ---- */
 
     _themeIsDark() {
-        const bg = getComputedStyle(this._card || this).backgroundColor || "";
+        const bg = getComputedStyle(this._stage || this).backgroundColor || "";
         const m = bg.match(/\d+/g);
         if (!m || m.length < 3) return true;
         // Rec. 601 luma — good enough to pick the light/dark colour set.
@@ -2599,18 +2570,712 @@ class OpenNeatoReplayCard extends HTMLElement {
     }
 }
 
-customElements.define("openneato-replay-card", OpenNeatoReplayCard);
+/* ── what the robot's device offers ─────────────────────────────────── */
+
+const INTEGRATION = "openneato";
+const CARD_TYPE = "openneato-replay-card";
+const REPLAY_TYPE = "openneato-replay";
+const CONTROLS_TYPE = "openneato-controls";
+const CONFIGURATION_TYPE = "openneato-configuration";
+const EDITOR_TYPE = "openneato-editor";
+
+const fire = (el, type, detail) => el.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
+const domainOf = (entityId) => String(entityId).split(".")[0];
+const capitalize = (text) => String(text).charAt(0).toUpperCase() + String(text).slice(1).replace(/_/g, " ");
+
+// A robot is a vacuum of this integration
+const isOpenNeato = (hass, entityId) =>
+    Boolean(entityId) && domainOf(entityId) === "vacuum" && hass?.entities?.[entityId]?.platform === INTEGRATION;
+
+function findRobot(hass) {
+    return Object.values(hass?.entities ?? {}).find(
+        (e) => e.platform === INTEGRATION && domainOf(e.entity_id) === "vacuum",
+    )?.entity_id;
+}
+
+// The other entities of the robot's device, in the domains given
+function siblings(hass, entityId, domains) {
+    const deviceId = hass?.entities?.[entityId]?.device_id;
+    if (!deviceId) return [];
+    return Object.values(hass.entities).filter(
+        (e) => e.device_id === deviceId && e.entity_id !== entityId && domains.includes(domainOf(e.entity_id)) && hass.states[e.entity_id],
+    );
+}
+
+// The name an entity goes by on its own device ("Eco mode", not "Alfred Eco mode")
+function shortName(hass, entityId) {
+    const friendly = hass.states[entityId]?.attributes?.friendly_name ?? entityId;
+    const device = hass.devices?.[hass.entities?.[entityId]?.device_id];
+    const deviceName = device?.name_by_user ?? device?.name;
+    return deviceName && friendly.startsWith(`${deviceName} `) ? friendly.slice(deviceName.length + 1) : friendly;
+}
+
+// What an entity is called in the card's options: its translation key, which
+// every language shares, else the end of its entity id
+const keyOf = (hass, entityId) => hass.entities?.[entityId]?.translation_key || entityId.split(".")[1];
+
+/* ── state content: every sensor of the robot ────────────────────────── */
+
+// The tile card shows "State content" from the attributes of its entity. The
+// robot's sensors are other entities, so they are handed to the tile card as
+// attributes of the robot (already formatted, in the language and units of
+// Home Assistant), and the two raw states the tile has no use for are left out.
+const DEFAULT_STATE_CONTENT = ["state", "charging", "battery_level"];
+const HIDDEN_ATTRIBUTES = ["robot_state", "ui_state"];
+
+function readouts(hass, entityId) {
+    return siblings(hass, entityId, ["sensor", "binary_sensor"]).map((e) => ({ key: keyOf(hass, e.entity_id), entityId: e.entity_id }));
+}
+
+// Reused while nothing it is made of has changed, so the tile card (which
+// compares the state object it is given) does not draw on every state change
+// in Home Assistant.
+function withReadouts(hass, entityId, memo) {
+    const stateObj = hass?.states?.[entityId];
+    if (!stateObj) return hass;
+    const reads = readouts(hass, entityId);
+    const parts = [stateObj, hass.formatEntityState, ...reads.map((r) => hass.states[r.entityId])];
+    let state = memo.state;
+    if (!(memo.parts && memo.parts.length === parts.length && parts.every((p, i) => p === memo.parts[i]))) {
+        const attributes = { ...stateObj.attributes };
+        for (const name of HIDDEN_ATTRIBUTES) delete attributes[name];
+        for (const r of reads) {
+            if (r.key in attributes) continue;
+            const s = hass.states[r.entityId];
+            attributes[r.key] = hass.formatEntityState ? hass.formatEntityState(s) : s.state;
+        }
+        state = { ...stateObj, attributes };
+        memo.parts = parts;
+        memo.state = state;
+    }
+    return { ...hass, states: { ...hass.states, [entityId]: state } };
+}
+
+/* ── the controls and the configuration ──────────────────────────────── */
+
+// The vacuum's own commands (Home Assistant's vacuum features, as bits)
+const CONTROLS = [
+    { key: "start", label: "Start", icon: "mdi:play", service: "vacuum.start", feature: 8192 },
+    { key: "pause", label: "Pause", icon: "mdi:pause", service: "vacuum.pause", feature: 4 },
+    { key: "stop", label: "Stop", icon: "mdi:stop", service: "vacuum.stop", feature: 8 },
+    { key: "dock", label: "Dock", icon: "mdi:home-import-outline", service: "vacuum.return_to_base", feature: 16 },
+    { key: "spot", label: "Spot clean", icon: "mdi:target", service: "vacuum.clean_spot", feature: 1024 },
+    { key: "locate", label: "Locate", icon: "mdi:map-marker", service: "vacuum.locate", feature: 512 },
+    { key: "fan_speed", label: "Suction", icon: "mdi:fan", feature: 32 },
+];
+const FAN_ICONS = { eco: "mdi:leaf", normal: "mdi:fan", intense: "mdi:fan-plus" };
+
+const controlsOf = (hass, entityId) =>
+    CONTROLS.filter((c) => ((hass.states[entityId]?.attributes?.supported_features ?? 0) & c.feature) !== 0);
+
+// The robot's settings: its switches and choices. The schedule's days and
+// times belong to the schedule's own page, not a row of buttons.
+function configurables(hass, entityId) {
+    return siblings(hass, entityId, ["switch", "select"])
+        .map((e) => ({ key: keyOf(hass, e.entity_id), entityId: e.entity_id, label: shortName(hass, e.entity_id) }))
+        .filter((c) => !c.key.startsWith("schedule_"))
+        .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+// Through Home Assistant's own action handling, as a card's tap action does
+function performAction(host, service, entityId, data) {
+    fire(host, "hass-action", {
+        config: {
+            tap_action: {
+                action: "perform-action", perform_action: service, target: { entity_id: entityId },
+                ...(data ? { data } : {}),
+            },
+        },
+        action: "tap",
+    });
+}
+
+const FEATURE_CSS = `
+    :host { display: block; }
+    .row { display: flex; flex-wrap: wrap; gap: var(--feature-button-spacing, 12px); }
+    .key {
+        flex: 1 1 0; min-width: 48px; height: var(--feature-height, 42px); padding: 0 8px; border: 0; cursor: pointer;
+        border-radius: var(--feature-border-radius, 12px); font: inherit; --mdc-icon-size: 20px;
+        background: var(--secondary-background-color); color: var(--primary-text-color);
+        display: flex; align-items: center; justify-content: center; gap: 6px; box-sizing: border-box;
+    }
+    .key.wide { flex: 1 1 40%; }
+    .key[aria-pressed="true"] { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+    .key:disabled { opacity: .5; cursor: default; }
+    span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+`;
+
+// A row of buttons. A subclass lists them in _buttons(): { key, label, icon, text,
+// pressed, disabled, wide, action } or { key, label, options, value, choose }.
+class OpenNeatoFeature extends HTMLElement {
+    constructor() {
+        super();
+        this.attachShadow({ mode: "open" });
+        this.shadowRoot.innerHTML = `<style>${FEATURE_CSS}</style><div class="row" role="group"></div>`;
+        this._row = this.shadowRoot.querySelector(".row");
+        // A press on a control is not a tap on whatever card holds it
+        for (const type of ["click", "touchstart", "touchend", "mousedown", "mouseup"]) {
+            this.addEventListener(type, (ev) => ev.stopPropagation());
+        }
+    }
+
+    static getConfigElement() {
+        return document.createElement(EDITOR_TYPE);
+    }
+
+    setConfig(config) {
+        if (!config) throw new Error("Invalid configuration");
+        this._config = config;
+        this._render();
+    }
+
+    set hass(hass) {
+        this._hass = hass;
+        this._render();
+    }
+
+    set context(context) {
+        this._context = context;
+        this._render();
+    }
+
+    get _entityId() {
+        return this._context?.entity_id;
+    }
+
+    _render() {
+        if (!this._hass || !this._config || !this._entityId) return;
+        const buttons = this._buttons();
+        const key = JSON.stringify(buttons.map(({ action, choose, ...b }) => b));
+        if (key === this._key) return;
+        this._key = key;
+        this._row.setAttribute("aria-label", this.constructor.label);
+        this._row.replaceChildren(...buttons.map((b) => this._button(b)));
+    }
+
+    _button(b) {
+        if (b.options) {
+            const select = document.createElement("select");
+            select.className = "key wide";
+            select.dataset.key = b.key;
+            select.setAttribute("aria-label", b.label);
+            select.title = b.label;
+            for (const option of b.options) {
+                const el = document.createElement("option");
+                el.value = option.value;
+                el.textContent = option.label;
+                select.append(el);
+            }
+            select.value = b.value;
+            select.addEventListener("change", () => b.choose(select.value));
+            return select;
+        }
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = b.wide ? "key wide" : "key";
+        button.dataset.key = b.key;
+        button.title = b.label;
+        button.setAttribute("aria-label", b.label);
+        if (b.pressed !== undefined) button.setAttribute("aria-pressed", String(!!b.pressed));
+        button.disabled = !!b.disabled;
+        if (b.icon) {
+            const icon = document.createElement("ha-icon");
+            icon.setAttribute("icon", b.icon);
+            button.append(icon);
+        }
+        if (b.text) {
+            const span = document.createElement("span");
+            span.textContent = b.text;
+            button.append(span);
+        }
+        button.addEventListener("click", () => b.action());
+        return button;
+    }
+}
+
+class OpenNeatoControls extends OpenNeatoFeature {
+    static label = "OpenNeato controls";
+
+    _buttons() {
+        const hass = this._hass;
+        const id = this._entityId;
+        const attributes = hass.states[id]?.attributes ?? {};
+        const available = controlsOf(hass, id);
+        const items = Array.isArray(this._config.items) ? this._config.items : [];
+        const buttons = [];
+        for (const key of items) {
+            const control = available.find((c) => c.key === key);
+            if (!control) continue;
+            if (key === "fan_speed") {
+                for (const speed of attributes.fan_speed_list ?? []) {
+                    buttons.push({
+                        key: `fan_${speed}`, label: `${control.label}: ${capitalize(speed)}`, icon: FAN_ICONS[speed] ?? "mdi:fan",
+                        pressed: attributes.fan_speed === speed,
+                        action: () => performAction(this, "vacuum.set_fan_speed", id, { fan_speed: speed }),
+                    });
+                }
+            } else {
+                buttons.push({ key, label: control.label, icon: control.icon, action: () => performAction(this, control.service, id) });
+            }
+        }
+        return buttons;
+    }
+}
+
+class OpenNeatoConfiguration extends OpenNeatoFeature {
+    static label = "OpenNeato configuration";
+
+    _buttons() {
+        const hass = this._hass;
+        const items = Array.isArray(this._config.items) ? this._config.items : [];
+        const available = configurables(hass, this._entityId);
+        const buttons = [];
+        for (const key of items) {
+            const item = available.find((c) => c.key === key);
+            if (!item) continue;
+            const stateObj = hass.states[item.entityId];
+            if (domainOf(item.entityId) === "select") {
+                buttons.push({
+                    key, label: item.label, options: (stateObj.attributes.options ?? []).map((o) => ({ value: o, label: capitalize(o) })),
+                    value: stateObj.state, choose: (value) => performAction(this, "select.select_option", item.entityId, { option: value }),
+                });
+            } else {
+                const on = stateObj.state === "on";
+                buttons.push({
+                    key, label: item.label, text: item.label, wide: true, pressed: on, disabled: stateObj.state === "unavailable",
+                    action: () => performAction(this, `switch.${on ? "turn_off" : "turn_on"}`, item.entityId),
+                });
+            }
+        }
+        return buttons;
+    }
+}
+
+/* ── the card ────────────────────────────────────────────────────────── */
+
+// The options that belong to the replay (the tile feature of the same name)
+const REPLAY_KEYS = [
+    "session", "entry_id", "rotation", "floorplan", "floorplan_opacity", "grid", "grid_lines", "tiled_plan",
+    "tiled_coverage", "trail", "fit", "units", "height", "speed", "autoplay", "show_picker", "show_distance",
+    "show_duration", "show_battery", "show_stats",
+];
+// The options that belong to the tile card on top. tap_action is the card's own.
+const TILE_KEYS = [
+    "name", "icon", "color", "vertical", "hide_state", "show_entity_picture", "hold_action", "double_tap_action",
+    "icon_tap_action", "icon_hold_action", "icon_double_tap_action",
+];
+const TOGGLE_ACTION = { action: "fire-dom-event", openneato_replay_card: "toggle" };
+
+// The tile features the card's options stand for, in the order they show
+function featuresOf(config) {
+    const replay = { type: `custom:${REPLAY_TYPE}` };
+    for (const key of REPLAY_KEYS) if (config[key] !== undefined) replay[key] = config[key];
+    const features = [replay];
+    if (Array.isArray(config.controls) && config.controls.length) {
+        features.push({ type: `custom:${CONTROLS_TYPE}`, items: config.controls });
+    }
+    if (Array.isArray(config.configuration) && config.configuration.length) {
+        features.push({ type: `custom:${CONFIGURATION_TYPE}`, items: config.configuration });
+    }
+    // Any other tile feature, set in YAML, follows
+    if (Array.isArray(config.features)) features.push(...config.features);
+    return features;
+}
+
+function tileConfigOf(config, entity, open) {
+    const tile = {
+        type: "tile", entity, tap_action: TOGGLE_ACTION,
+        state_content: config.state_content ?? DEFAULT_STATE_CONTENT,
+        features: open ? featuresOf(config) : [],
+    };
+    for (const key of TILE_KEYS) if (config[key] !== undefined) tile[key] = config[key];
+    return tile;
+}
+
+class OpenNeatoCard extends HTMLElement {
+    constructor() {
+        super();
+        this.attachShadow({ mode: "open" });
+        this.shadowRoot.innerHTML = `
+            <style>
+                :host { display: block; }
+                .frame { position: relative; }
+                .notice { padding: 16px; color: var(--secondary-text-color); }
+                .chevron {
+                    position: absolute; top: 12px; right: 12px; z-index: 1; padding: 8px; border: 0; cursor: pointer;
+                    display: inline-flex; border-radius: 50%; background: none; color: var(--primary-text-color); line-height: 0;
+                }
+                .chevron:hover { background: var(--secondary-background-color); }
+                .chevron svg { width: 20px; height: 20px; fill: currentColor; transition: transform 150ms ease-in-out; }
+                .chevron[aria-expanded="true"] svg { transform: rotate(180deg); }
+                @media (prefers-reduced-motion: reduce) { .chevron svg { transition: none; } }
+                [hidden] { display: none !important; }
+            </style>
+            <div class="frame">
+                <div class="tilewrap"></div>
+                <div class="notice" hidden>Choose an OpenNeato vacuum in this card's options.</div>
+                <button class="chevron" type="button" aria-expanded="false" hidden>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
+                </button>
+            </div>`;
+        this._frame = this.shadowRoot.querySelector(".frame");
+        this._tileWrap = this.shadowRoot.querySelector(".tilewrap");
+        this._notice = this.shadowRoot.querySelector(".notice");
+        this._chevron = this.shadowRoot.querySelector(".chevron");
+        this._hass = null;
+        this._config = null;
+        this._open = false;
+        this._tile = null;
+        this._memo = {};
+        // A tap on the tile card, or on the arrow, shows or hides what is under the tile
+        this._frame.addEventListener("ll-custom", (ev) => {
+            if (ev.detail?.openneato_replay_card !== "toggle") return;
+            ev.stopPropagation();
+            this._setOpen(!this._open);
+        });
+        this._chevron.addEventListener("click", () => this._setOpen(!this._open));
+    }
+
+    static getConfigElement() {
+        return document.createElement(EDITOR_TYPE);
+    }
+
+    static getStubConfig(hass) {
+        const entity = findRobot(hass);
+        return entity ? { type: `custom:${CARD_TYPE}`, entity } : { type: `custom:${CARD_TYPE}` };
+    }
+
+    setConfig(config) {
+        if (!config) throw new Error("Invalid configuration");
+        this._config = config;
+        this._open = this._storedOpen() ?? config.expanded === true;
+        this._apply();
+    }
+
+    set hass(hass) {
+        this._hass = hass;
+        if (!this._config) return;
+        if (this._tile) this._tile.hass = this._tileHass();
+        else this._apply();
+    }
+
+    getCardSize() {
+        return this._open ? 8 : 1;
+    }
+
+    getGridOptions() {
+        return { columns: 12, rows: "auto", min_columns: 6 };
+    }
+
+    get _entityId() {
+        return this._config?.entity || findRobot(this._hass);
+    }
+
+    _tileHass() {
+        return withReadouts(this._hass, this._entityId, this._memo);
+    }
+
+    // Whether the card is open is remembered in this browser, per robot
+    get _storageKey() {
+        return `openneato-replay-card:${this._config?.entity || "robot"}`;
+    }
+
+    _storedOpen() {
+        try {
+            const value = window.localStorage.getItem(this._storageKey);
+            return value === null ? undefined : value === "1";
+        } catch (err) {
+            return undefined;
+        }
+    }
+
+    _setOpen(open) {
+        if (open === this._open) return;
+        this._open = open;
+        try {
+            window.localStorage.setItem(this._storageKey, open ? "1" : "0");
+        } catch (err) {
+            // Storage can be unavailable (private windows); the card still works
+        }
+        this._apply();
+    }
+
+    // The tile card, with its features only while the card is open: a closed
+    // card has no feature on the page, so it asks the robot for nothing.
+    _apply() {
+        const entity = this._entityId;
+        this._notice.hidden = Boolean(entity) || !this._hass;
+        this._chevron.hidden = !entity;
+        this._chevron.setAttribute("aria-expanded", String(this._open));
+        this._chevron.setAttribute("aria-label", this._open ? "Hide the replay and controls" : "Show the replay and controls");
+        if (!entity) return;
+        const tile = tileConfigOf(this._config, entity, this._open);
+        if (this._tile) {
+            this._tile.setConfig(tile);
+        } else if (customElements.get("hui-tile-card")) {
+            this._createTile(tile);
+        } else if (!this._loading && window.loadCardHelpers) {
+            // The tile card is loaded on demand; the card helpers load it
+            this._loading = true;
+            window.loadCardHelpers().then(async (helpers) => {
+                helpers.createCardElement({ type: "tile", entity });
+                await customElements.whenDefined("hui-tile-card");
+                this._loading = false;
+                if (!this._tile) this._createTile(tileConfigOf(this._config, this._entityId || entity, this._open));
+            });
+        }
+    }
+
+    _createTile(tile) {
+        this._tile = document.createElement("hui-tile-card");
+        this._tile.setConfig(tile);
+        if (this._hass) this._tile.hass = this._tileHass();
+        this._tileWrap.replaceChildren(this._tile);
+    }
+}
+
+/* ── the editor ──────────────────────────────────────────────────────── */
+
+// Home Assistant's form component and its selectors load with the dashboard
+// editor, not with a custom card. The tile card's own editor pulls in the same
+// parts, so asking for it first makes sure they are there.
+async function loadEditorParts() {
+    if (customElements.get("ha-form") && customElements.get("ha-selector")) return;
+    const helpers = await window.loadCardHelpers?.();
+    if (!helpers) return;
+    helpers.createCardElement({ type: "tile", entity: "sun.sun" });
+    await customElements.whenDefined("hui-tile-card");
+    await customElements.get("hui-tile-card").getConfigElement?.();
+}
+
+const EDITOR_LABELS = {
+    entity: "Robot (vacuum)",
+    state_content: "State content",
+    expanded: "Expanded on load",
+    show_picker: "Session picker",
+    show_distance: "Distance",
+    show_duration: "Duration",
+    show_battery: "Battery",
+    units: "Units",
+    height: "Map height (px)",
+    fit: "Framing",
+    grid: "Neato-app look (grid lines and tiles)",
+    trail: "Fading track behind the robot",
+    autoplay: "Play automatically",
+    speed: "Starting playback speed",
+    controls: "Controls",
+    configuration: "Settings",
+};
+
+const EDITOR_HELPERS = {
+    entity: "Found by itself when there is one robot.",
+    state_content: "What the tile shows under the name: the robot's state and any of its sensors.",
+    expanded: "Show the map and controls when the page loads, until you choose in this browser. A tap on the tile shows or hides them.",
+    show_picker: "Hidden, the map shows the latest run, and follows a clean as it starts.",
+    speed: "Session seconds per real second when the card loads. The button on the map changes it only until the page reloads.",
+    controls: "Buttons under the map, in this order.",
+    configuration: "The robot's switches and choices, in this order.",
+};
+
+const choice = (options) => ({ select: { mode: "dropdown", options } });
+const toggle = (name) => ({ name, selector: { boolean: {} } });
+
+// The replay's options, in the order they show on the card: the picker, the
+// figures beside it, the map, then the playback controls under it
+const REPLAY_FIELDS = [
+    toggle("show_picker"),
+    toggle("show_distance"),
+    toggle("show_duration"),
+    toggle("show_battery"),
+    {
+        name: "units",
+        selector: choice([
+            { value: "auto", label: "Auto (from Home Assistant)" },
+            { value: "metric", label: "Metric" },
+            { value: "imperial", label: "US customary" },
+        ]),
+    },
+    { name: "height", selector: { number: { min: 120, max: 1200, step: 10, mode: "box", unit_of_measurement: "px" } } },
+    {
+        name: "fit",
+        selector: choice([
+            { value: "stable", label: "Stable (steady between cleanings)" },
+            { value: "plan", label: "Whole floorplan" },
+            { value: "session", label: "Tight on this session" },
+        ]),
+    },
+    toggle("grid"),
+    toggle("trail"),
+    toggle("autoplay"),
+    { name: "speed", selector: { number: { min: 1, max: 64, step: 1, mode: "box" } } },
+];
+
+const sortable = (name, options) => ({ name, selector: { select: { multiple: true, reorder: true, options } } });
+
+function controlOptions(hass, entity) {
+    return controlsOf(hass, entity).map((c) => ({ value: c.key, label: c.label }));
+}
+
+function configurationOptions(hass, entity) {
+    return configurables(hass, entity).map((c) => ({ value: c.key, label: c.label }));
+}
+
+function editorKind(config) {
+    const type = String(config?.type ?? "").replace("custom:", "");
+    return [REPLAY_TYPE, CONTROLS_TYPE, CONFIGURATION_TYPE].includes(type) ? type : CARD_TYPE;
+}
+
+function editorSchema(kind, config, hass, entity) {
+    if (kind === REPLAY_TYPE) return REPLAY_FIELDS;
+    if (kind === CONTROLS_TYPE) return [sortable("items", controlOptions(hass, entity))];
+    if (kind === CONFIGURATION_TYPE) return [sortable("items", configurationOptions(hass, entity))];
+    const section = (title, schema) => ({ type: "expandable", name: "", title, flatten: true, schema });
+    return [
+        { name: "entity", selector: { entity: { domain: "vacuum", integration: INTEGRATION } } },
+        { name: "state_content", selector: { ui_state_content: { entity_id: entity, allow_name: false } } },
+        section("Replay map", [toggle("expanded"), ...REPLAY_FIELDS]),
+        section("Controls", [sortable("controls", controlOptions(hass, entity))]),
+        section("Configuration", [sortable("configuration", configurationOptions(hass, entity))]),
+    ];
+}
+
+// What the form shows: the defaults under what is set. A height of "fill" (an
+// older option) has no place in a number box, so it is left out.
+function editorData(kind, config, entity) {
+    const data = { ...DEFAULTS, ...config };
+    for (const key of ["type", "session", "show_stats"]) delete data[key];
+    if (typeof data.height !== "number") delete data.height;
+    if (kind === CARD_TYPE) {
+        data.expanded = config.expanded === true;
+        data.controls = config.controls ?? [];
+        data.configuration = config.configuration ?? [];
+        data.state_content = config.state_content ?? DEFAULT_STATE_CONTENT;
+        if (entity && !data.entity) data.entity = entity;
+    }
+    if (kind === CONTROLS_TYPE || kind === CONFIGURATION_TYPE) return { items: config.items ?? [] };
+    return data;
+}
+
+const EDITOR_DEFAULTS = { ...DEFAULTS, expanded: false, controls: [], configuration: [], state_content: DEFAULT_STATE_CONTENT, items: [] };
+
+class OpenNeatoEditor extends HTMLElement {
+    constructor() {
+        super();
+        this.attachShadow({ mode: "open" });
+        this._config = { type: `custom:${CARD_TYPE}` };
+        this._hass = null;
+        this._memo = {};
+    }
+
+    setConfig(config) {
+        this._config = config;
+        this._render();
+    }
+
+    set hass(hass) {
+        this._hass = hass;
+        if (this._form) this._render();
+    }
+
+    // Tile features are given the entity they sit under
+    set context(context) {
+        this._context = context;
+    }
+
+    connectedCallback() {
+        this._render();
+    }
+
+    get _entity() {
+        return this._config.entity || this._context?.entity_id || findRobot(this._hass);
+    }
+
+    async _render() {
+        if (!this.isConnected && !this._form) return;
+        if (!this._form) {
+            this._form = document.createElement("ha-form");
+            this._form.computeLabel = (item) => EDITOR_LABELS[item.name] ?? item.title ?? item.name;
+            this._form.computeHelper = (item) => EDITOR_HELPERS[item.name];
+            this._form.addEventListener("value-changed", (ev) => this._changed(ev));
+            this.shadowRoot.replaceChildren(this._form);
+            try {
+                await loadEditorParts();
+            } catch (err) {
+                console.warn("openneato-card: editor parts did not load", err);
+            }
+        }
+        const kind = editorKind(this._config);
+        const entity = this._entity;
+        // With the robot's sensors as attributes, so State content can offer them
+        this._form.hass = entity ? withReadouts(this._hass, entity, this._memo) : this._hass;
+        this._shown = editorData(kind, this._config, entity);
+        this._form.data = this._shown;
+        this._form.schema = editorSchema(kind, this._config, this._hass, entity);
+    }
+
+    // Only what the person changed goes into the configuration. Everything
+    // else (a pinned session, the tile card's own options, other features)
+    // stays as it was in the YAML, and a value set back to its default is
+    // dropped so the YAML stays short.
+    _changed(ev) {
+        ev.stopPropagation();
+        const value = ev.detail.value;
+        const config = { ...this._config };
+        const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+        for (const key of Object.keys(value)) {
+            if (same(value[key], this._shown[key])) continue;
+            const v = value[key];
+            if (v === undefined || v === "" || v === null || (key in EDITOR_DEFAULTS && same(EDITOR_DEFAULTS[key], v) && key !== "items")) {
+                delete config[key];
+            } else if (key === "items" && Array.isArray(v) && v.length === 0) {
+                config.items = [];
+            } else {
+                config[key] = v;
+            }
+        }
+        for (const key of Object.keys(this._shown)) if (!(key in value)) delete config[key];
+        this._config = config;
+        fire(this, "config-changed", { config });
+    }
+}
+
+/* ── registration ────────────────────────────────────────────────────── */
+
+for (const [tag, cls] of [
+    [REPLAY_TYPE, OpenNeatoReplay],
+    [CONTROLS_TYPE, OpenNeatoControls],
+    [CONFIGURATION_TYPE, OpenNeatoConfiguration],
+    [EDITOR_TYPE, OpenNeatoEditor],
+    [CARD_TYPE, OpenNeatoCard],
+]) {
+    if (!customElements.get(tag)) customElements.define(tag, cls);
+}
+
+const supported = (extra) => (hass, context) => isOpenNeato(hass, context?.entity_id) && (!extra || extra(hass, context.entity_id));
+window.customCardFeatures = window.customCardFeatures || [];
+for (const feature of [
+    { type: REPLAY_TYPE, name: "OpenNeato replay map", isSupported: supported(), configurable: true },
+    { type: CONTROLS_TYPE, name: "OpenNeato controls", isSupported: supported((hass, id) => controlsOf(hass, id).length > 0), configurable: true },
+    {
+        type: CONFIGURATION_TYPE, name: "OpenNeato configuration",
+        isSupported: supported((hass, id) => configurables(hass, id).length > 0), configurable: true,
+    },
+]) {
+    if (!window.customCardFeatures.some((f) => f.type === feature.type)) window.customCardFeatures.push(feature);
+}
 
 window.customCards = window.customCards || [];
-window.customCards.push({
-    type: "openneato-replay-card",
-    name: "OpenNeato Replay",
-    description: "Smooth canvas replay of a cleaning session, with scrubber and playback controls.",
-    preview: false,
-});
+if (!window.customCards.some((card) => card.type === CARD_TYPE)) {
+    window.customCards.push({
+        type: CARD_TYPE,
+        name: "OpenNeato",
+        description: "The robot as a tile card: its state and sensors, and under it the replay of a cleaning, controls and settings.",
+        preview: false,
+    });
+}
 
 console.info(
-    `%c OPENNEATO-REPLAY-CARD %c ${CARD_VERSION} `,
+    `%c OPENNEATO-CARD %c ${CARD_VERSION} `,
     "color: #1e1e22; background: #34c759; font-weight: 700;",
     "color: #34c759; background: #1e1e22;",
 );
