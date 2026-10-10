@@ -3089,6 +3089,7 @@ class OpenNeatoCard extends HTMLElement {
 
 const select = (options, extra = {}) => ({ select: { mode: "dropdown", options: options.map(([value, label]) => ({ value, label })), ...extra } });
 const sortable = (options) => ({ select: { multiple: true, reorder: true, mode: "dropdown", options: options.map(([value, label]) => ({ value, label })) } });
+const divider = { type: "divider" };
 const toggle = (name, label, helper) => ({ name, label, ...(helper ? { helper } : {}), selector: { boolean: {} } });
 
 // The Replay map's form fields, in order, and where each is kept in YAML
@@ -3127,6 +3128,8 @@ const FEATURE_FORMS = {
                 toggle("duration", "Duration"),
                 toggle("battery", "Battery"),
                 toggle("hide_labels", "Hide labels", "Show the figures without their names; the names show on hover."),
+                // Home Assistant's divider sets apart the options kept together in YAML
+                divider,
                 toggle("autoplay", "Autoplay"),
                 { name: "units", label: "Units", required: true, selector: select([["auto", "Auto"], ["metric", "Metric"], ["us_customary", "US customary"]]) },
                 { name: "height", label: "Height", selector: { number: { mode: "box", min: 120, max: 1200, step: 10, unit_of_measurement: "px" } } },
@@ -3134,19 +3137,23 @@ const FEATURE_FORMS = {
                     name: "fit", label: "Framing", required: true,
                     selector: select([["stable", "Stable between cleanings"], ["plan", "Whole floorplan"], ["session", "This session only"]]),
                 },
+                divider,
                 toggle("straighten", "Straighten against the walls"),
                 {
                     name: "degrees", label: "Rotation",
                     helper: straighten ? "Added to the straightened angle." : "The map's angle.",
                     selector: { number: { mode: "box", min: -360, max: 360, step: 0.5, unit_of_measurement: "°" } },
                 },
+                divider,
                 toggle("floorplan", "Floorplan"),
                 // They do nothing without the floorplan
                 ...(floorplan ? [
                     toggle("floorplan_tiled", "Tiled floorplan"),
                     { name: "floorplan_opacity", label: "Floorplan opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } },
                 ] : []),
+                divider,
                 toggle("grid", "Background grid"),
+                divider,
                 toggle("trail", "Trail"),
                 toggle("coverage_tiled", "Tiled coverage and trail"),
             ];
