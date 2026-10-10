@@ -348,6 +348,41 @@
     expectEqual([bounds.minX, bounds.maxX].map((v) => Math.round(v * 10) / 10), [1, 4], "the floorplan's width in metres");
   });
 
+  test("map: Aligning shows beside Live while the live clean uses the last clean's alignment", () => hasFeaturesList() && source().includes("aligning"), async () => {
+    clearStage();
+    const el = mountReplay();
+    await until(() => el._session, "the session to load");
+    const aligning = el.shadowRoot.querySelector(".livebox .aligning");
+    el._setLive(true);
+    el._aligning = true;
+    el._renderChip();
+    expect(visible(aligning), "Aligning does not show");
+    expectEqual(aligning.textContent.trim(), "Aligning", "the badge's text");
+    el._aligning = false;
+    el._renderChip();
+    expect(!visible(aligning), "Aligning still shows once aligned");
+    el._setLive(false);
+  });
+
+  test("picker: unless a session was picked by hand, the card follows the newest clean", () => hasFeaturesList() && source().includes("this._userPicked && listed"), async () => {
+    clearStage();
+    const el = mountReplay();
+    await readyPicker(el);
+    const newest = picker(el).options[0].value;
+    await until(() => el._selectedName === newest && el._session, "the newest clean");
+    // Left on an older clean without a pick by hand (as when the clean it
+    // followed was renamed), the next list refresh goes back to the newest
+    el._selectedName = picker(el).options[2].value;
+    el._userPicked = false;
+    await el._reconcileSelection();
+    expectEqual(el._selectedName, newest, "the clean shown");
+    // Picked by hand, it stays
+    el._userPicked = true;
+    await el._selectSession(picker(el).options[2].value);
+    await el._reconcileSelection();
+    expectEqual(el._selectedName, picker(el).options[2].value, "the clean picked by hand");
+  });
+
   test("speed: the button on the map remembers its choice for the next time", hasReplay, async () => {
     localStorage.removeItem("openneato-card:speed");
     clearStage();

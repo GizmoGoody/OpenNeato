@@ -52,6 +52,9 @@ class FakeRunner:
     async def async_live_alignment(self, name: str) -> tuple[int, int, int] | None:
         return self.live
 
+    def live_alignment_source(self, name: str) -> str:
+        return "live" if self.live else "none"
+
 
 class FakeConnection:
     """Collects what the command sends back."""
@@ -196,3 +199,41 @@ async def test_live_clean_starts_from_the_last_cleans_alignment(hass: HomeAssist
     # And it stands for the clean if it ends before a fit of its own
     await runner._finish()
     assert runner.alignment(NAME) == (1, -6, -3)
+
+
+
+async def test_a_live_fit_prefers_one_near_the_last_alignment(hass: HomeAssistant) -> None:
+    """A clean's first walls can match a small patch anywhere; the fit near the
+    last clean's alignment is kept unless another fits clearly better."""
+    if not hasattr(lidar_mapper, "align_near"):
+        pytest.skip("This branch has no search near the last alignment")
+    turned = {cell: 1 for cell in lidar_mapper._rotate_cells(ROOM, 3)}
+    assert lidar_mapper.align_near(turned, ROOM, (1, -6, -3)) == (1, 0, 0, 1.0)
+
+    runner = lidar_runner.LidarMapRunner(hass, "entry", None, SimpleNamespace(async_add_listener=lambda *_: None))
+    runner._map = lidar_mapper.AccumulatedMap({})
+    runner._map.walls = dict(ROOM)
+    runner._collecting = True
+    runner._session_name = NAME
+    runner._live_guess = (1, -6, -3)
+    runner._captures = [(0.0, 0.0, 0.0, [], 5.0)] * lidar_runner.LIVE_ALIGN_MIN_CAPTURES
+    assert runner.live_alignment_source(NAME) == "previous"
+    # The whole-map search lands on a false match, as one real clean's did
+    with (
+        patch.object(lidar_runner, "build_session_grids", lambda captures: (turned, set())),
+        patch.object(lidar_runner, "align_to_reference", lambda new, ref: (0, 17, 39, 0.99)),
+    ):
+        assert await runner.async_live_alignment(NAME) == (1, 0, 0)
+    assert runner.live_alignment_source(NAME) == "live"
+
+
+async def test_the_session_says_which_alignment_it_is_drawn_with(hass: HomeAssistant) -> None:
+    """Merged once the clean is in the map; the live run's own source while recording."""
+    if "alignment_source" not in open(websocket.__file__, encoding="utf-8").read():
+        pytest.skip("This branch does not report the alignment source")
+    runner, built = _set_up(hass, recording=True)
+    runner.live = (1, 0, 0)
+    connection = FakeConnection()
+    with patch.object(websocket, "build_replay_session", _fake_build(built)):
+        await _get_session(hass, connection)
+    assert connection.results[-1]["alignment_source"] == "live"
