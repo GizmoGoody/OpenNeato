@@ -313,6 +313,20 @@
     expect(Math.max(...gaps) - Math.min(...gaps) <= 2, `uneven spacing: ${gaps}`);
   });
 
+  test("stats: a live clean shows its distance so far, in the same order as after it", () => hasFeaturesList(), async () => {
+    clearStage();
+    const el = mountReplay();
+    await until(() => el._session && statsNames(el).includes("Distance"), "the session to load");
+    const names = () => statsNames(el).split(" ").filter((w) => ["Distance", "Duration", "Battery"].includes(w));
+    const after = names();
+    el._setLive(true);
+    el._renderStats();
+    const live = names();
+    el._setLive(false);
+    expectEqual(live, after, "the figures' order, live and after");
+    expectEqual(live, ["Distance", "Duration", "Battery"], "the figures");
+  });
+
   test("speed: the button on the map remembers its choice for the next time", hasReplay, async () => {
     localStorage.removeItem("openneato-card:speed");
     clearStage();
