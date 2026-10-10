@@ -78,16 +78,13 @@ const DEFAULTS = {
     autoplay: false,
     floorplan: true,
     floorplan_opacity: 1,
-    // The Neato-app look: half-metre lines, the plan quantised onto the
-    // lattice, coverage and trail as square tiles. false gives a flat map —
-    // no lines, smooth plan, smooth swept area and a rounded track.
-    grid: true,
-    // Per-layer overrides of `grid`; unset follows it. `tiled_coverage`
-    // covers the trail too: it is painted on the same lattice as the
-    // coverage so the two never read as different drawings.
-    grid_lines: undefined,
-    tiled_plan: undefined,
-    tiled_coverage: undefined,
+    // The Neato-app look, one part at a time: half-metre lines, the plan
+    // quantised onto the lattice, and coverage and trail as square tiles. Off,
+    // each part is flat instead: no lines, a smooth plan, a smooth swept area
+    // and a rounded track.
+    grid_lines: true,
+    tiled_plan: true,
+    tiled_coverage: true,
     // "auto" follows Home Assistant's unit system; "metric" or "imperial"
     // overrides it.
     units: "auto",
@@ -103,16 +100,14 @@ const DEFAULTS = {
     // "session" — raw cleaned-area bounds; tightest, but the view shifts and
     //             rescales from one cleaning to the next.
     fit: "stable",
-    // The session picker. Hidden, the map shows the latest run (and follows a
-    // clean as it starts), unless `session` pins one.
+    // The session picker. Hidden, the map shows the latest run, and follows a
+    // clean as it starts.
     show_picker: true,
-    // The three figures beside the picker. `show_stats: false` (the old
-    // single switch) still turns all three off.
+    // The three figures beside the picker
     show_distance: true,
     show_duration: true,
     show_battery: true,
     height: 360,
-    session: "latest",
 };
 
 /* ── small helpers ──────────────────────────────────────────────────── */
@@ -313,8 +308,7 @@ class OpenNeatoReplay extends HTMLElement {
         this._loading = false;
         this._sessionsLoading = false;
         // Outcome of the last fetch for `_selectedName`: null while nothing
-        // has been tried, then "ok" | "empty" | "error" | "missing" (a pinned
-        // session that is not on the robot yet). A failed completed
+        // has been tried, then "ok" | "empty" | "error". A failed completed
         // session is not retried by the list tick; a live one is retried on
         // the live cadence.
         this._loadState = null;
@@ -383,13 +377,11 @@ class OpenNeatoReplay extends HTMLElement {
     setConfig(config) {
         this._config = { ...DEFAULTS, ...config };
         this._speed = this._storedSpeed();
-        this._selectedName =
-            this._config.session && this._config.session !== "latest" ? this._config.session : null;
-        const master = this._config.grid ?? DEFAULTS.grid;
+        this._selectedName = null;
         this._look = {
-            lines: this._config.grid_lines ?? master,
-            plan: this._config.tiled_plan ?? master,
-            tiles: this._config.tiled_coverage ?? master,
+            lines: this._config.grid_lines !== false,
+            plan: this._config.tiled_plan !== false,
+            tiles: this._config.tiled_coverage !== false,
         };
         this._buildDom();
     }
@@ -944,33 +936,17 @@ class OpenNeatoReplay extends HTMLElement {
         const listed = (name) => Boolean(name) && this._sessions.some((s) => s.name === name);
         const live = this._sessions.find((s) => s.recording);
         const liveName = live ? live.name : null;
-        // A *new* clean lifts a manual pick. `session: latest` promises to
-        // switch to a clean as it starts; the pin only ever meant "leave me
-        // on what I chose while this one runs". Caveat: a list that briefly
+        // A *new* clean lifts a manual pick: the card switches to a clean as it
+        // starts, and the pick only ever meant "leave me on what I chose while
+        // this one runs". Caveat: a list that briefly
         // drops the recording entry and gets it back would lift the pin
         // spuriously; rare, since the coordinator carries last-known history
         // forward instead of serving a gap.
         if (liveName && liveName !== this._seenLive) this._userPicked = false;
         this._seenLive = liveName;
 
-        const pinned = this._config.session && this._config.session !== "latest";
-        if (pinned && !listed(this._config.session)) {
-            // Say so rather than quietly showing some other session; the
-            // list keeps polling, so the card picks it up when the file
-            // appears.
-            if (this._loadState !== "missing") {
-                this._clearSelection();
-                this._selectedName = this._config.session;
-                this._loadState = "missing";
-                this._fail(`Session not found\n${this._config.session} is not on the robot.`);
-            }
-            this._syncDelete();
-            return;
-        }
         let wanted;
-        if (pinned) {
-            wanted = this._config.session;
-        } else if (liveName && !this._userPicked) {
+        if (liveName && !this._userPicked) {
             wanted = liveName;
         } else if (listed(this._selectedName)) {
             wanted = this._selectedName;
@@ -979,7 +955,7 @@ class OpenNeatoReplay extends HTMLElement {
         }
 
         const nowRecording = Boolean(this._sessions.find((s) => s.name === wanted)?.recording);
-        const untried = this._loadState === null || this._loadState === "missing";
+        const untried = this._loadState === null;
         if (wanted !== this._selectedName || (!this._session && untried)) {
             await this._selectSession(wanted);
         } else if (this._live && !nowRecording) {
@@ -1271,8 +1247,7 @@ class OpenNeatoReplay extends HTMLElement {
 
     _renderStats() {
         if (!this._statsEl || !this._session) return;
-        const legacyOff = this._config.show_stats === false;
-        const show = (key) => !legacyOff && this._config[key] !== false;
+        const show = (key) => this._config[key] !== false;
         const s = this._session.summary || {};
         const info = this._session.session || {};
         const units = this._units;
@@ -2646,7 +2621,7 @@ const DEFAULT_STATE_CONTENT = ["state", "charging", "battery"];
 const HIDDEN_ATTRIBUTES = ["robot_state", "ui_state"];
 // Home Assistant's State content picker hides an attribute called battery_level
 // (it keeps its own battery attributes out of the list), so the sensor goes by
-// another name there. The old name still works in YAML.
+// another name there.
 const ATTRIBUTE_ALIASES = { battery_level: "battery" };
 const aliased = (key) => ATTRIBUTE_ALIASES[key] ?? key;
 
@@ -2899,55 +2874,14 @@ class OpenNeatoConfiguration extends OpenNeatoFeature {
 
 // The card's only option of its own. Everything else is the tile card's.
 const OWN_KEYS = ["expanded"];
-// The replay-only card had these at the top; they now belong to the Replay map
-// feature, and a card without a features list gets that one feature with them.
-const LEGACY_REPLAY_KEYS = [
-    "session", "entry_id", "rotation", "floorplan", "floorplan_opacity", "grid", "grid_lines", "tiled_plan",
-    "tiled_coverage", "trail", "fit", "units", "height", "speed", "autoplay", "show_picker", "show_distance",
-    "show_duration", "show_battery", "show_stats", "title", "collapsible",
-];
 const TOGGLE_ACTION = { action: "fire-dom-event", openneato_replay_card: "toggle" };
-
-// The card as the editor writes it, with every feature in the tile card's
-// features list. Earlier versions of the card kept options at the top that the
-// tile card does not know (and its editor refuses): the replay-only card's map
-// options, and the first OpenNeato card's controls, configuration and
-// collapsible. They become features here, so older cards keep working.
-const DROPPED_KEYS = ["title", "speed", "collapsible"];
-function explicit(config) {
-    const next = { ...config };
-    const features = Array.isArray(next.features) ? next.features.map((f) => ({ ...f })) : [];
-    let replay = features.find((f) => f.type === `custom:${REPLAY_TYPE}`);
-    const legacy = LEGACY_REPLAY_KEYS.filter((key) => key in next);
-    if (!Array.isArray(next.features) || legacy.some((key) => !DROPPED_KEYS.includes(key))) {
-        if (!replay) {
-            replay = { type: `custom:${REPLAY_TYPE}` };
-            features.unshift(replay);
-        }
-    }
-    for (const key of legacy) {
-        if (!DROPPED_KEYS.includes(key) && !(key in replay)) replay[key] = next[key];
-        delete next[key];
-    }
-    if (Array.isArray(next.controls)) {
-        const items = next.controls.filter((key) => key !== "fan_speed");
-        if (items.length) features.push({ type: `custom:${CONTROLS_TYPE}`, items });
-        if (next.controls.includes("fan_speed")) features.push({ type: `custom:${SUCTION_TYPE}` });
-    }
-    if (Array.isArray(next.configuration) && next.configuration.length) {
-        features.push({ type: `custom:${CONFIGURATION_TYPE}`, items: next.configuration });
-    }
-    for (const key of ["controls", "configuration", ...DROPPED_KEYS]) delete next[key];
-    next.features = features;
-    return JSON.stringify(next) === JSON.stringify(config) ? config : next;
-}
 
 // The tile card's own configuration. A tap on the tile shows or hides the
 // features, which are left out while the card is closed.
 function tileConfigOf(config, entity, open) {
-    const tile = { ...explicit(config), type: "tile", entity, tap_action: TOGGLE_ACTION };
+    const tile = { ...config, type: "tile", entity, tap_action: TOGGLE_ACTION };
     for (const key of OWN_KEYS) delete tile[key];
-    tile.state_content = (config.state_content ?? DEFAULT_STATE_CONTENT).map(aliased);
+    tile.state_content = config.state_content ?? DEFAULT_STATE_CONTENT;
     if (!open) tile.features = [];
     return tile;
 }
@@ -3122,6 +3056,12 @@ const select = (options, extra = {}) => ({ select: { mode: "dropdown", options: 
 const sortable = (options) => ({ select: { multiple: true, reorder: true, mode: "dropdown", options: options.map(([value, label]) => ({ value, label })) } });
 const toggle = (name, label, helper) => ({ name, label, ...(helper ? { helper } : {}), selector: { boolean: {} } });
 
+// The Replay map's options, in the order of its form
+const REPLAY_OPTIONS = [
+    "show_picker", "show_distance", "show_duration", "show_battery", "units", "height", "fit", "rotation",
+    "floorplan", "floorplan_opacity", "grid_lines", "tiled_plan", "tiled_coverage", "trail", "autoplay",
+];
+
 // Each feature's form: the fields, what they show, and what is saved
 const FEATURE_FORMS = {
     // The Replay map, in the order its parts show on the card: the picker and the
@@ -3145,51 +3085,19 @@ const FEATURE_FORMS = {
             },
             toggle("floorplan", "Floorplan"),
             { name: "floorplan_opacity", label: "Floorplan opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } },
-            toggle("grid", "Grid"),
             toggle("grid_lines", "Grid lines"),
             toggle("tiled_plan", "Tiled floorplan"),
             toggle("tiled_coverage", "Tiled coverage and trail"),
             toggle("trail", "Trail"),
             toggle("autoplay", "Autoplay"),
-            { name: "session", label: "Session", selector: { text: {} } },
         ],
-        data: (c) => {
-            const grid = c.grid ?? DEFAULTS.grid;
-            return {
-                show_picker: c.show_picker ?? DEFAULTS.show_picker,
-                show_distance: c.show_stats === false ? false : c.show_distance ?? DEFAULTS.show_distance,
-                show_duration: c.show_stats === false ? false : c.show_duration ?? DEFAULTS.show_duration,
-                show_battery: c.show_stats === false ? false : c.show_battery ?? DEFAULTS.show_battery,
-                units: c.units ?? DEFAULTS.units,
-                height: Number(c.height) || DEFAULTS.height,
-                fit: c.fit ?? DEFAULTS.fit,
-                rotation: String(c.rotation ?? DEFAULTS.rotation),
-                floorplan: c.floorplan ?? DEFAULTS.floorplan,
-                floorplan_opacity: c.floorplan_opacity ?? DEFAULTS.floorplan_opacity,
-                grid,
-                grid_lines: c.grid_lines ?? grid,
-                tiled_plan: c.tiled_plan ?? grid,
-                tiled_coverage: c.tiled_coverage ?? grid,
-                trail: c.trail ?? DEFAULTS.trail,
-                autoplay: c.autoplay ?? DEFAULTS.autoplay,
-                session: c.session ?? DEFAULTS.session,
-            };
-        },
-        // Only what differs from the defaults is written, and the three grid
-        // parts only when they differ from Grid
+        data: (c) => Object.fromEntries(REPLAY_OPTIONS.map((key) => [key, c[key] ?? DEFAULTS[key]])),
+        // Only what differs from the defaults is written
         save: (v, c) => {
             const out = { ...c };
-            delete out.show_stats;
-            // A change to Grid takes the three parts with it
-            const gridChanged = v.grid !== (c.grid ?? DEFAULTS.grid);
             for (const [key, value] of Object.entries(v)) {
-                if (gridChanged && ["grid_lines", "tiled_plan", "tiled_coverage"].includes(key)) {
-                    delete out[key];
-                    continue;
-                }
-                const fallback = ["grid_lines", "tiled_plan", "tiled_coverage"].includes(key) ? v.grid : DEFAULTS[key];
                 const normal = key === "rotation" && value !== "auto" && Number.isFinite(Number(value)) ? Number(value) : value;
-                if (normal === undefined || normal === "" || String(normal) === String(fallback)) delete out[key];
+                if (normal === undefined || normal === "" || String(normal) === String(DEFAULTS[key])) delete out[key];
                 else out[key] = normal;
             }
             return out;
@@ -3320,7 +3228,7 @@ function tileEditorType() {
 
 // What the tile card's editor is given: the card without its own option
 function tileEditorConfig(config) {
-    const tile = { ...explicit(config), type: "tile" };
+    const tile = { ...config, type: "tile" };
     for (const key of OWN_KEYS) delete tile[key];
     delete tile.tap_action;
     return tile;
@@ -3385,10 +3293,9 @@ class OpenNeatoCardEditor extends HTMLElement {
     }
 
     setConfig(config) {
-        this._config = explicit(config);
+        this._config = config;
         this._render();
         this._setTileEditorConfig();
-        if (JSON.stringify(this._config) !== JSON.stringify(config)) this._fire();
     }
 
     async _setTileEditorConfig() {

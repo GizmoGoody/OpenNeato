@@ -182,7 +182,7 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
   | Option | Default | What it does |
   |---|---|---|
   | `expanded` | `false` | Show the features when the page loads, until the person has chosen in this browser. |
-  | `state_content` | `state`, `charging`, `battery` | `state`, and any sensor of the robot by its key, such as `charging`, `battery` (the battery level; `battery_level` also works), `wifi_signal`, `uptime`, `last_clean_area` and `error_message`. |
+  | `state_content` | `state`, `charging`, `battery` | `state`, and any sensor of the robot by its key, such as `charging`, `battery` (the battery level), `wifi_signal`, `uptime`, `last_clean_area` and `error_message`. |
 
   The features also work in any tile card for the robot:
 
@@ -197,7 +197,7 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
 
   | Option | Default | What it does |
   |---|---|---|
-  | `show_picker` | `true` | The session dropdown and delete button. When hidden, the map shows the latest run and follows a clean as it starts (unless `session` pins one), and the date, mode and area show beside it. |
+  | `show_picker` | `true` | The session dropdown and delete button. When hidden, the map shows the latest run and follows a clean as it starts, and the date, mode and area show beside it. |
   | `show_distance` | `true` | The distance of the session. |
   | `show_duration` | `true` | The duration of the session. |
   | `show_battery` | `true` | The battery before and after, and the recharges. |
@@ -207,20 +207,17 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
   | `rotation` | `auto` | `auto` straightens the map against its walls; a number in degrees pins the view. |
   | `floorplan` | `true` | Draw the walls (the floorplan the integration builds from the robot's LIDAR) under the session. |
   | `floorplan_opacity` | `1` | Opacity of the floorplan, `0` to `1`. |
-  | `grid` | `true` | The Neato-app look: half-metre grid lines, and floorplan, coverage and trail drawn as square tiles. `false` gives a flat map. |
-  | `grid_lines`, `tiled_plan`, `tiled_coverage` | *follow `grid`* | The grid lines, the tiled floorplan, and the tiled coverage and trail, one at a time. |
+  | `grid_lines` | `true` | Half-metre grid lines. |
+  | `tiled_plan` | `true` | The floorplan drawn as square tiles, as in the Neato app. `false` draws it smooth. |
+  | `tiled_coverage` | `true` | The coverage and trail drawn as square tiles. `false` draws a smooth swept area and a rounded track. |
   | `trail` | `true` | Fading track behind the robot. |
   | `autoplay` | `false` | Play from the beginning as soon as a session loads. A session that is still recording is followed live instead. |
-  | `session` | `latest` | `latest`, or the file name of one session to pin. |
   | `entry_id` | *(first entry)* | Which OpenNeato config entry to read when there is more than one robot. YAML only. |
 
   The playback speed button on the map remembers its choice in the browser. The session picker shows only
   the date and time of the session on screen while it is closed, and the full line for every session while
   its list is open. A session recorded before the bridge had the real time (NTP not synced, and no robot
   clock) shows as *Date unknown*. Check *NTP synced* on the bridge's device.
-
-  A replay-only card from before (its options at the top level, with no `features` list) still works, and
-  the card editor turns those options into a Replay map feature. `title` and `speed` are no longer used.
 - **Reading the diagnostics** — two field names are misleading and the integration corrects for them:
   `errorCode` returns **200** (`UI_ALERT_INVALID`) when nothing is wrong, so the *Error code* sensor
   reports *unknown* instead; and `chargerMAH` / `dischargeMAH` are **milliamps, not milliamp-hours**
