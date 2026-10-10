@@ -249,6 +249,10 @@ async def ws_get_session(
     if not parsed.get("path"):
         connection.send_error(msg["id"], "empty_session", "Session contains no pose data")
         return
+    # Which alignment the run is drawn with, so the card can say while a live
+    # clean is still settling: merged, live (its own fit), previous (the last
+    # clean's, until its own is ready) or none
+    parsed["alignment_source"] = source
 
     # Evaluated now rather than before the fetch: the session may have
     # completed while we were downloading it, and the flag the card gets
@@ -267,10 +271,6 @@ async def ws_get_session(
                 cache.pop(next(iter(cache)))
             cache[(entry_id, name)] = {**parsed, "alignment": list(align) if align else None}
 
-    # Which alignment the run is drawn with, so the card can say while a live
-    # clean is still settling: merged, live (its own fit), previous (the last
-    # clean's, until its own is ready) or none
-    parsed = {**parsed, "alignment_source": source}
     connection.send_result(
         msg["id"],
         {**parsed, "floorplan": _floorplan_payload(hass, entry_id), "recording": recording},
