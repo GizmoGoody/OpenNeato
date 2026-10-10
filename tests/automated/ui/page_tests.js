@@ -241,6 +241,24 @@
     expectEqual(none, "", "the stats row with all three off");
   });
 
+  test("speed: the button on the map remembers its choice for the next time", hasReplay, async () => {
+    localStorage.removeItem("openneato-replay-card:speed");
+    clearStage();
+    const first = mountReplay();
+    const button = first.shadowRoot.querySelector(".speed");
+    await until(() => first._session && !button.disabled, "the map to load");
+    expectEqual(button.textContent.trim(), "8×", "the speed at first");
+    await press(button);
+    expectEqual(button.textContent.trim(), "16×", "after one press");
+    clearStage();
+    const second = mountReplay();
+    expectEqual(second.shadowRoot.querySelector(".speed").textContent.trim(), "16×", "the speed on the next load");
+    // Round the speeds to the first again, and the choice is the first
+    for (let i = 0; i < 3; i++) await press(second.shadowRoot.querySelector(".speed"));
+    expectEqual(second.shadowRoot.querySelector(".speed").textContent.trim(), "1×", "after wrapping round");
+    localStorage.removeItem("openneato-replay-card:speed");
+  });
+
   /* ── the card: a tile card, and what is under it ─────────────────────── */
 
   const hasCard = () => source().includes("withReadouts");
@@ -524,7 +542,7 @@
     clearStage();
     const { form } = await hostedEditor(cardConfig);
     expectEqual(fieldNames(sections(form)[0].schema),
-      ["expanded", "show_picker", "show_distance", "show_duration", "show_battery", "units", "height", "fit", "grid", "trail", "autoplay", "speed"],
+      ["expanded", "show_picker", "show_distance", "show_duration", "show_battery", "units", "height", "fit", "grid", "trail", "autoplay"],
       "the Replay map options");
     expectEqual(fieldNames(form.schema).includes("show_stats"), false, "the old show_stats switch");
   });
@@ -534,7 +552,7 @@
     const { form } = await hostedEditor(cardConfig);
     const label = (name) => form.computeLabel({ name });
     expectEqual(label("expanded"), "Expanded on load", "expanded");
-    expectEqual(label("speed"), "Starting playback speed", "speed");
+    expectEqual(fieldNames(form.schema).includes("speed"), false, "a playback speed option");
     expectEqual(["show_picker", "show_distance", "show_duration", "show_battery"].map(label), ["Session picker", "Distance", "Duration", "Battery"], "the parts");
     expectEqual(field(form, "units").selector.select.options.map((o) => o.label), ["Auto (from Home Assistant)", "Metric", "US customary"], "the units");
     expect(form.computeHelper({ name: "show_picker" }).includes("latest run"), "no note on what the map shows without the picker");
@@ -557,10 +575,10 @@
     clearStage();
     const { form, saved } = await hostedEditor(cardConfig);
     expectEqual([form.data.show_picker, form.data.show_distance, form.data.units, form.data.expanded], [true, true, "auto", false], "the defaults");
-    edit(form, { units: "imperial", speed: 16, show_distance: false });
-    expectEqual(last(saved), { ...cardConfig, units: "imperial", speed: 16, show_distance: false }, "after the change");
+    edit(form, { units: "imperial", height: 400, show_distance: false });
+    expectEqual(last(saved), { ...cardConfig, units: "imperial", height: 400, show_distance: false }, "after the change");
     edit(form, { units: "auto", show_distance: true });
-    expectEqual(last(saved), { ...cardConfig, speed: 16 }, "back to the defaults");
+    expectEqual(last(saved), { ...cardConfig, height: 400 }, "back to the defaults");
   });
 
   test("editor: what the form does not know stays exactly as it was", hasEditor, async () => {
@@ -590,7 +608,7 @@
     clearStage();
     const replay = await hostedEditor({ type: "custom:openneato-replay", units: "imperial" }, { entity_id: VACUUM });
     expectEqual(fieldNames(replay.form.schema),
-      ["show_picker", "show_distance", "show_duration", "show_battery", "units", "height", "fit", "grid", "trail", "autoplay", "speed"], "the replay's options");
+      ["show_picker", "show_distance", "show_duration", "show_battery", "units", "height", "fit", "grid", "trail", "autoplay"], "the replay's options");
     edit(replay.form, { show_picker: false });
     expectEqual(last(replay.saved), { type: "custom:openneato-replay", units: "imperial", show_picker: false }, "the replay's saved options");
     const controls = await hostedEditor({ type: "custom:openneato-controls", items: ["start"] }, { entity_id: VACUUM });
