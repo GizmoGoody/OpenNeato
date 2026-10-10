@@ -99,6 +99,7 @@ class LidarMapRunner:
         self._health_ref: dict[str, Any] | None = None
         self._session_name: str | None = None
         self._live_align: tuple[int, int, int] | None = None
+        self._live_guess: tuple[int, int, int] | None = None
         self._live_align_at = 0.0
         self._live_align_busy = False
         self.last_report: dict[str, Any] = {}
@@ -146,6 +147,10 @@ class LidarMapRunner:
         self._session_name = (self._health_ref or {}).get("name")
         self._live_align = None
         self._live_align_at = 0.0
+        # Until this run has enough scans for a fit of its own, start from the
+        # last run's: the robot's frame stays the same from clean to clean
+        last = list(self._map.alignments.values())[-1] if self._map and self._map.alignments else None
+        self._live_guess = tuple(last) if last else None
         self._start_timer()
         _LOGGER.info("LIDAR mapping: collection started")
 
@@ -382,10 +387,10 @@ class LidarMapRunner:
             return None
         now = time.monotonic()
         if self._live_align_busy or now - self._live_align_at < LIVE_ALIGN_EVERY:
-            return self._live_align
+            return self._live_align or self._live_guess
         captures = self._drop_slow_scans(list(self._captures))
         if len(captures) < LIVE_ALIGN_MIN_CAPTURES:
-            return self._live_align
+            return self._live_align or self._live_guess
         self._live_align_busy = True
         self._live_align_at = now
         try:
@@ -403,7 +408,7 @@ class LidarMapRunner:
         )
         if overlap >= MERGE_MIN_OVERLAP:
             self._live_align = (quarter, dx, dy)
-        return self._live_align
+        return self._live_align or self._live_guess
 
     def view_rotation(self, user_offset: float = 0.0) -> float:
         """Rotation that stands the map upright, plus the user's offset."""
