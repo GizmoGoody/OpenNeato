@@ -69,7 +69,9 @@ jobs:
       - name: Install test dependencies
         run: pip install pytest-homeassistant-custom-component
       - name: Run tests
-        run: pytest -q -rs
+        run: |
+          # Exit code 5 means every test was skipped (the branch has none of the features)
+          pytest -q -rs || [ $? -eq 5 ]
 
   firmware-matrix:
     name: Resolve firmware matrix
