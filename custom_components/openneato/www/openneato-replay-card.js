@@ -1692,6 +1692,10 @@ class OpenNeatoReplay extends HTMLElement {
             return (v[1] + v[2]) / 2;
         });
         const TOL = 24;
+        // The integration's plan is black walls on a transparent background,
+        // and a transparent pixel reads as black too: there, anything that is
+        // not transparent is the plan.
+        const clearCorners = corners.every((o) => data[o + 3] < 8);
 
         let x0 = W;
         let y0 = H;
@@ -1703,6 +1707,7 @@ class OpenNeatoReplay extends HTMLElement {
                 const o = at(x, y);
                 if (data[o + 3] < 8) continue; // transparent margin, if any
                 if (
+                    !clearCorners &&
                     Math.abs(data[o] - bg[0]) <= TOL &&
                     Math.abs(data[o + 1] - bg[1]) <= TOL &&
                     Math.abs(data[o + 2] - bg[2]) <= TOL
