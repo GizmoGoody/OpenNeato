@@ -652,9 +652,11 @@
   test("rotation: straightened against the walls plus the degrees, or the degrees alone", hasFeaturesList, async () => {
     clearStage();
     const straight = mountReplay({ rotation: { degrees: 90 } });
+    await until(() => straight._session, "the session to load");
     straight._floorplan = { viewRotation: 12 };
     expectEqual(straight._baseRotationDeg(), 102, "straightened, plus 90");
     const fixed = mountReplay({ rotation: { straighten: false, degrees: 90 } });
+    await until(() => fixed._session, "the session to load");
     fixed._floorplan = { viewRotation: 12 };
     expectEqual(fixed._baseRotationDeg(), 90, "the degrees alone");
     fixed._updateAutoQuarter(400, 200, { minX: 0, maxX: 1, minY: 0, maxY: 10 });
