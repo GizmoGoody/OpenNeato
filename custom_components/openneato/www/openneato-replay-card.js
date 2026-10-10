@@ -287,6 +287,19 @@ class Session {
         return this.path[i * 4 + 3];
     }
 
+    // How far the robot has gone along the path, in metres. The firmware writes
+    // a clean's distance only when it ends; while it is live, this stands in.
+    pathLength() {
+        if (this._length === undefined) {
+            let total = 0;
+            for (let i = 1; i < this.poseCount; i++) {
+                total += Math.hypot(this.path[i * 4] - this.path[(i - 1) * 4], this.path[i * 4 + 1] - this.path[(i - 1) * 4 + 1]);
+            }
+            this._length = total;
+        }
+        return this._length;
+    }
+
     // Robot pose at a session-relative timestamp, linearly interpolated in
     // position and shortest-arc in heading so the sprite never snaps.
     interpolate(ts) {
@@ -513,8 +526,10 @@ class OpenNeatoReplay extends HTMLElement {
                 .stats {
                     display: flex;
                     flex-wrap: nowrap;
-                    justify-content: space-between;
                     gap: 16px;
+                    /* The same 16px at the ends as between the figures, so the
+                       space around each is even */
+                    padding-inline: 16px;
                     font-size: 0.8rem;
                     color: var(--secondary-text-color);
                     flex: 1 1 auto;
@@ -525,8 +540,14 @@ class OpenNeatoReplay extends HTMLElement {
                 .stats::-webkit-scrollbar {
                     display: none;
                 }
+                /* Even space around the figures when they fit; from the left
+                   when they do not (auto margins give way to nothing) */
                 .stats span {
                     white-space: nowrap;
+                    margin-left: auto;
+                }
+                .stats span:last-child {
+                    margin-right: auto;
                 }
                 .del {
                     flex: 0 0 auto;
@@ -658,15 +679,21 @@ class OpenNeatoReplay extends HTMLElement {
                     color: var(--live);
                     border: 1px solid var(--live);
                 }
-                .stage button.live {
+                /* The badge's corner is its wrapper's, so the badge's own
+                   redraws never move it; the same inset from both edges */
+                .livebox {
+                    --inset: 8px;
                     position: absolute;
                     z-index: 1;
+                    display: flex;
+                }
+                .livebox.top_left { top: var(--inset); left: var(--inset); }
+                .livebox.top_right { top: var(--inset); right: var(--inset); }
+                .livebox.bottom_left { bottom: var(--inset); left: var(--inset); }
+                .livebox.bottom_right { bottom: var(--inset); right: var(--inset); }
+                .livebox button.live {
                     background: var(--card-background-color);
                 }
-                .stage button.live.top_left { top: 8px; left: 8px; }
-                .stage button.live.top_right { top: 8px; right: 8px; }
-                .stage button.live.bottom_left { bottom: 8px; left: 8px; }
-                .stage button.live.bottom_right { bottom: 8px; right: 8px; }
                 button.live.on {
                     background: var(--live);
                     color: #fff;
@@ -743,7 +770,7 @@ class OpenNeatoReplay extends HTMLElement {
                 <div class="stage">
                     <canvas></canvas>
                     <div class="overlay">Loading…</div>
-                    <button class="live" hidden></button>
+                    <div class="livebox"><button class="live" hidden></button></div>
                 </div>
                 <div class="controls">
                     <button class="play" title="Play/Pause" disabled>
@@ -775,7 +802,7 @@ class OpenNeatoReplay extends HTMLElement {
         this._totalEl = root.querySelector(".total");
         this._scrub = root.querySelector(".scrub");
         this._liveBtn = root.querySelector(".live");
-        this._liveBtn.classList.add(this._config.live_position);
+        root.querySelector(".livebox").classList.add(this._config.live_position);
 
         this._stage.style.height = `${Number(this._config.height) || DEFAULTS.height}px`;
         this._picker.hidden = !this._config.show_picker;
@@ -1337,9 +1364,15 @@ class OpenNeatoReplay extends HTMLElement {
             }
         }
         if (this._live) {
-            // Only what is known while recording — the summary (area,
-            // distance, end battery) is written when the clean ends.
+            // Only what is known while recording: the summary (area,
+            // distance, end battery) is written when the clean ends, so the
+            // distance is worked out from the path so far.
             const since = (Date.now() - this._liveSince) / 1000;
+            // In the same order as after the clean: distance, duration, battery
+            const travelled = this._session.pathLength();
+            if (travelled > 0 && show("show_distance")) {
+                bits.push(figure("Distance", formatDistance(travelled, units, locale)));
+            }
             if (show("show_duration")) {
                 bits.push(figure("Duration", formatClock(this._session.duration + since)));
             }
