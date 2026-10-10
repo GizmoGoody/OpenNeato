@@ -258,7 +258,11 @@
     forgetOpenState();
     const el = mountCard({ entity: VACUUM });
     await tileReady(el);
-    await until(() => tileText(el).includes("Charging") && tileText(el).includes("85"), "the sensors on the tile");
+    try {
+      await until(() => tileText(el).includes("Charging") && tileText(el).includes("85"), "the sensors on the tile");
+    } catch (err) {
+      throw new Error(`${err.message}; the tile says: ${tileText(el).replace(/\s+/g, " ").slice(0, 300)}; state_content=${JSON.stringify(tileOf(el)._config?.state_content)}`);
+    }
     const text = tileText(el);
     expect(/docked/i.test(text), `the state is missing: ${text}`);
     expect(!text.includes("ST_C_Standby") && !text.includes("UIMGR"), `a raw state is shown: ${text}`);
