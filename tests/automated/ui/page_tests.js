@@ -26,8 +26,11 @@
     }
     throw new Error(`Timed out waiting for ${what}${last ? ` (${last})` : ""}`);
   }
+  // Same keys and values, whatever order the keys are in
+  const canon = (v) => (v && typeof v === "object" && !Array.isArray(v)
+    ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
   function expectEqual(actual, expected, what) {
-    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    if (JSON.stringify(canon(actual)) !== JSON.stringify(canon(expected))) {
       throw new Error(`${what}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
     }
   }
@@ -353,7 +356,9 @@
     const { form } = await hostedEditor({ type: "custom:openneato-replay-card", entity: VACUUM });
     await until(() => deepText(form.shadowRoot).includes("Tile that opens the replay"), "the labels");
     const text = deepText(form.shadowRoot);
-    for (const label of ["Robot (vacuum)", "Title", "Map", "Parts of the card"]) expect(text.includes(label), `no ${label}`);
+    for (const label of ["Title", "Map", "Parts of the card"]) expect(text.includes(label), `no ${label}`);
+    // The entity picker draws its label inside a component of its own
+    expectEqual(form.computeLabel({ name: "entity" }), "Robot (vacuum)", "the picker's label");
     expectEqual(form.data.units, "auto", "the default units");
     expectEqual(form.data.collapsible, false, "the default for the tile");
     expectEqual(form.data.show_picker, true, "the default for the picker");
