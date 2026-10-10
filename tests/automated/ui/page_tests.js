@@ -98,6 +98,15 @@
     await sleep(150);
   }
 
+  // Home Assistant gives every card in a dashboard a new hass whenever a state
+  // changes; a card on this page gets the same
+  function follow(el) {
+    const timer = setInterval(() => {
+      if (!el.isConnected) clearInterval(timer);
+      else el.hass = hass();
+    }, 250);
+  }
+
   const dateOf = (epoch) => new Date(epoch * 1000).toLocaleString(undefined, {
     day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
   });
@@ -118,6 +127,7 @@
     el.context = { entity_id: VACUUM };
     el.hass = hass();
     stage().append(el);
+    follow(el);
     return el;
   }
   const picker = (el) => el.shadowRoot.querySelector(".picker");
@@ -250,6 +260,7 @@
     el.setConfig({ type: `custom:${CARD}`, ...config });
     el.hass = h;
     stage().append(el);
+    if (h === hass()) follow(el);
     return el;
   }
 
@@ -259,12 +270,12 @@
     const el = mountCard({ entity: VACUUM });
     await tileReady(el);
     // The test frontend has no backend translations, so a binary sensor reads "on", not "Charging"
-    await until(() => /Charging|on/.test(tileText(el)) && tileText(el).includes("85"), "the sensors on the tile");
+    await until(() => /Charging|(^|[^A-Za-z])on([^A-Za-z]|$)/.test(tileText(el)) && tileText(el).includes("85"), "the sensors on the tile");
     const text = tileText(el);
     expect(/docked/i.test(text), `the state is missing: ${text}`);
     expect(!text.includes("ST_C_Standby") && !text.includes("UIMGR"), `a raw state is shown: ${text}`);
     expect(!text.includes("-55"), `the Wi-Fi signal is shown without being asked for: ${text}`);
-    expect(text.indexOf("85") > text.search(/Charging|on/), `the order is not State, Charging, Battery level: ${text}`);
+    expect(text.indexOf("85") > text.search(/Charging|(^|[^A-Za-z])on([^A-Za-z]|$)/), `the order is not State, Charging, Battery level: ${text}`);
   });
 
   test("card: State content can show any sensor of the robot", hasCard, async () => {
@@ -273,7 +284,7 @@
     const el = mountCard({ entity: VACUUM, state_content: ["state", "wifi_signal", "uptime"] });
     await tileReady(el);
     await until(() => tileText(el).includes("-55") && tileText(el).includes("29"), "the chosen sensors");
-    expect(!/Charging|on/.test(tileText(el).replace("Test Robot", "")), "a sensor that was not chosen is shown");
+    expect(!/Charging|(^|[^A-Za-z])on([^A-Za-z]|$)/.test(tileText(el).replace("Test Robot", "")), "a sensor that was not chosen is shown");
   });
 
   test("card: the robot's sensors reach the tile as attributes, without the raw states, and are reused", hasCard, async () => {
