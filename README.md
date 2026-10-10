@@ -193,6 +193,7 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
       units: auto
       height: 360
       fit: stable
+      live_position: bottom_right
       rotation:
         straighten: true
         degrees: 0
@@ -216,7 +217,7 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
 
   The options above `expanded` are the tile card's (there is no `tap_action`: a tap shows or hides
   the features). `state_content` takes `state` and any sensor of the robot by its key, such as
-  `charging`, `battery`, `wifi_signal`, `uptime`, `last_clean_area` and `error_message`. `expanded`
+  `charging`, `battery`, `wifi_signal`, `uptime`, `last_clean_area` and `error_message` (the robot's own message, such as asking for the dust bin to be emptied). A sensor with nothing to show is left out of the line. `expanded`
   shows the features when the page loads, until the person has chosen in this browser. The card is
   full width unless its layout says otherwise.
 
@@ -229,6 +230,7 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
   | `units` | `auto` follows the Home Assistant unit system; `metric` or `us_customary` overrides it. |
   | `height` | Map height in px. |
   | `fit` | `stable` frames the cleaned area on a 1 m grid so the view stops shifting between cleanings; `plan` keeps the whole floorplan in view; `session` is the tightest fit. |
+  | `live_position` | The corner of the map the live badge sits in during a clean: `top_left`, `top_right`, `bottom_left` or `bottom_right`. |
   | `rotation` | `straighten` turns the map so the walls line up with the card, then turns it a quarter if that fills the card better; `degrees` is added to that angle. Without `straighten`, `degrees` is the map's angle. |
   | `floorplan` | The walls (the floorplan the integration builds from the robot's LIDAR): `show`, `tiled` (square tiles, as in the Neato app, or smooth), and `opacity` (`0` to `1`). |
   | `grid` | The half-metre background grid. |

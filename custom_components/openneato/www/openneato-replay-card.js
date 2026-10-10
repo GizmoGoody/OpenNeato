@@ -118,11 +118,15 @@ const REPLAY_DEFAULTS = {
     units: "auto",
     height: 360,
     fit: "stable",
+    live_position: "bottom_right",
     rotation: { straighten: true, degrees: 0 },
     floorplan: { show: true, tiled: true, opacity: 1 },
     grid: true,
     coverage: { trail: true, tiled: true },
 };
+
+// The map corner the live badge sits in
+const LIVE_POSITIONS = ["top_left", "top_right", "bottom_left", "bottom_right"];
 
 // The YAML read into the flat values the drawing code uses
 function replayOptions(c = {}) {
@@ -137,6 +141,7 @@ function replayOptions(c = {}) {
         units: c.units ?? REPLAY_DEFAULTS.units,
         height: c.height ?? REPLAY_DEFAULTS.height,
         fit: c.fit ?? REPLAY_DEFAULTS.fit,
+        live_position: LIVE_POSITIONS.includes(c.live_position) ? c.live_position : REPLAY_DEFAULTS.live_position,
         straighten: g("rotation", "straighten"),
         rotation_degrees: Number(g("rotation", "degrees")) || 0,
         floorplan: g("floorplan", "show"),
@@ -508,6 +513,7 @@ class OpenNeatoReplay extends HTMLElement {
                 .stats {
                     display: flex;
                     flex-wrap: nowrap;
+                    justify-content: space-between;
                     gap: 16px;
                     font-size: 0.8rem;
                     color: var(--secondary-text-color);
@@ -593,11 +599,23 @@ class OpenNeatoReplay extends HTMLElement {
                     color: var(--secondary-text-color);
                     font-size: 0.8rem;
                 }
+                /* The row never spills out of the card: the scrubber gives way
+                   first, then the total time on a narrow card, and anything
+                   still too wide is clipped rather than pushed outside. */
                 .controls {
                     display: flex;
                     align-items: center;
                     gap: 8px;
                     padding: 8px 16px 12px;
+                    min-width: 0;
+                    overflow: hidden;
+                    container-type: inline-size;
+                }
+                .controls > * {
+                    flex-shrink: 0;
+                }
+                @container (max-width: 300px) {
+                    .clock.total { display: none; }
                 }
                 button {
                     background: none;
@@ -640,6 +658,15 @@ class OpenNeatoReplay extends HTMLElement {
                     color: var(--live);
                     border: 1px solid var(--live);
                 }
+                .stage button.live {
+                    position: absolute;
+                    z-index: 1;
+                    background: var(--card-background-color);
+                }
+                .stage button.live.top_left { top: 8px; left: 8px; }
+                .stage button.live.top_right { top: 8px; right: 8px; }
+                .stage button.live.bottom_left { bottom: 8px; left: 8px; }
+                .stage button.live.bottom_right { bottom: 8px; right: 8px; }
                 button.live.on {
                     background: var(--live);
                     color: #fff;
@@ -673,7 +700,9 @@ class OpenNeatoReplay extends HTMLElement {
                     text-align: center;
                 }
                 input[type="range"] {
-                    flex: 1;
+                    flex: 1 1 0;
+                    width: 0;
+                    min-width: 32px;
                     -webkit-appearance: none;
                     appearance: none;
                     height: 6px;
@@ -714,6 +743,7 @@ class OpenNeatoReplay extends HTMLElement {
                 <div class="stage">
                     <canvas></canvas>
                     <div class="overlay">Loading…</div>
+                    <button class="live" hidden></button>
                 </div>
                 <div class="controls">
                     <button class="play" title="Play/Pause" disabled>
@@ -726,7 +756,6 @@ class OpenNeatoReplay extends HTMLElement {
                     <span class="clock elapsed">0:00</span>
                     <input type="range" class="scrub" min="0" max="1" step="0.05" value="0" disabled>
                     <span class="clock total">0:00</span>
-                    <button class="live" hidden></button>
                 </div>
             </ha-card>
         `;
@@ -746,6 +775,7 @@ class OpenNeatoReplay extends HTMLElement {
         this._totalEl = root.querySelector(".total");
         this._scrub = root.querySelector(".scrub");
         this._liveBtn = root.querySelector(".live");
+        this._liveBtn.classList.add(this._config.live_position);
 
         this._stage.style.height = `${Number(this._config.height) || DEFAULTS.height}px`;
         this._picker.hidden = !this._config.show_picker;
@@ -2672,7 +2702,7 @@ function readouts(hass, entityId) {
 // Reused while nothing it is made of has changed, so the tile card (which
 // compares the state object it is given) does not draw on every state change
 // in Home Assistant.
-function withReadouts(hass, entityId, memo) {
+function withReadouts(hass, entityId, memo, everything = false) {
     const stateObj = hass?.states?.[entityId];
     if (!stateObj) return hass;
     const reads = readouts(hass, entityId);
@@ -2683,6 +2713,8 @@ function withReadouts(hass, entityId, memo) {
         for (const r of reads) {
             if (r.key in attributes) continue;
             const s = hass.states[r.entityId];
+            // Nothing to say (an error message with no error): left out of the line
+            if (!everything && ["", "unknown", "unavailable"].includes(s.state)) continue;
             attributes[r.key] = hass.formatEntityState ? hass.formatEntityState(s) : s.state;
         }
         // The picker names an attribute by what the device calls the sensor ("WiFi signal")
@@ -3103,6 +3135,7 @@ const REPLAY_FIELDS = [
     ["units", null, "units"],
     ["height", null, "height"],
     ["fit", null, "fit"],
+    ["live_position", null, "live_position"],
     ["straighten", "rotation", "straighten"],
     ["degrees", "rotation", "degrees"],
     ["floorplan", "floorplan", "show"],
@@ -3136,6 +3169,10 @@ const FEATURE_FORMS = {
                 {
                     name: "fit", label: "Framing", required: true,
                     selector: select([["stable", "Stable between cleanings"], ["plan", "Whole floorplan"], ["session", "This session only"]]),
+                },
+                {
+                    name: "live_position", label: "Live badge", required: true,
+                    selector: select([["top_left", "Top left"], ["top_right", "Top right"], ["bottom_left", "Bottom left"], ["bottom_right", "Bottom right"]]),
                 },
                 divider,
                 toggle("straighten", "Straighten against the walls"),
@@ -3361,7 +3398,8 @@ class OpenNeatoCardEditor extends HTMLElement {
     // With the robot's sensors as attributes, so State content can offer them
     _tileHass(entity) {
         const id = entity || robots(this._hass)[0];
-        return id ? withReadouts(this._hass, id, this._memo) : this._hass;
+        // Every sensor, with a value or not, so the picker can offer each one
+        return id ? withReadouts(this._hass, id, this._memo, true) : this._hass;
     }
 
     setConfig(config) {
