@@ -287,6 +287,19 @@ class Session {
         return this.path[i * 4 + 3];
     }
 
+    // How far the robot has gone along the path, in metres. The firmware writes
+    // a clean's distance only when it ends; while it is live, this stands in.
+    pathLength() {
+        if (this._length === undefined) {
+            let total = 0;
+            for (let i = 1; i < this.poseCount; i++) {
+                total += Math.hypot(this.path[i * 4] - this.path[(i - 1) * 4], this.path[i * 4 + 1] - this.path[(i - 1) * 4 + 1]);
+            }
+            this._length = total;
+        }
+        return this._length;
+    }
+
     // Robot pose at a session-relative timestamp, linearly interpolated in
     // position and shortest-arc in heading so the sprite never snaps.
     interpolate(ts) {
@@ -1348,9 +1361,15 @@ class OpenNeatoReplay extends HTMLElement {
             }
         }
         if (this._live) {
-            // Only what is known while recording — the summary (area,
-            // distance, end battery) is written when the clean ends.
+            // Only what is known while recording: the summary (area,
+            // distance, end battery) is written when the clean ends, so the
+            // distance is worked out from the path so far.
             const since = (Date.now() - this._liveSince) / 1000;
+            // In the same order as after the clean: distance, duration, battery
+            const travelled = this._session.pathLength();
+            if (travelled > 0 && show("show_distance")) {
+                bits.push(figure("Distance", formatDistance(travelled, units, locale)));
+            }
             if (show("show_duration")) {
                 bits.push(figure("Duration", formatClock(this._session.duration + since)));
             }
