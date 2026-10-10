@@ -392,7 +392,21 @@
     try {
       await until(() => selector.getBoundingClientRect().height > 20, "the robot picker to show");
     } catch (err) {
-      throw new Error(`${err.message}: ${describe()}`);
+      // A control: Home Assistant's own form with a plain entity picker, to tell
+      // this environment from the editor's schema
+      const control = document.createElement("ha-form");
+      control.hass = hass();
+      control.data = { entity: VACUUM };
+      control.schema = [{ name: "entity", selector: { entity: {} } }];
+      const filtered = document.createElement("ha-form");
+      filtered.hass = hass();
+      filtered.data = { entity: VACUUM };
+      filtered.schema = [{ name: "entity", selector: { entity: { domain: "vacuum" } } }];
+      stage().append(control, filtered);
+      await sleep(4000);
+      const h = (form) => Math.round(form.shadowRoot?.querySelector("ha-selector")?.getBoundingClientRect().height ?? -1);
+      const tags = ["ha-generic-picker", "ha-picker-field", "ha-picker-combo-box", "ha-entity-picker"].map((n) => `${n}=${!!customElements.get(n)}`).join(" ");
+      throw new Error(`${err.message}: ${describe()}; control(no filter)=${h(control)}px, control(domain only)=${h(filtered)}px; ${tags}`);
     }
   });
 
