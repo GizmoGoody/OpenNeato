@@ -120,14 +120,14 @@ try {
         imported = true;
         await import(${JSON.stringify(cardPath)});
       }
-      if (hass?.connected && customElements.get("openneato-replay-card") && window.loadCardHelpers) return { ok: true };
+      if (hass?.connected && (customElements.get("openneato-card") || customElements.get("openneato-replay-card")) && window.loadCardHelpers) return { ok: true };
       await new Promise((r) => setTimeout(r, 100));
     }
     const hass = document.querySelector("home-assistant")?.hass;
     return {
       ok: false, url: location.href, title: document.title,
       app: !!document.querySelector("home-assistant"), hass: !!hass, connected: !!hass?.connected,
-      card: !!customElements.get("openneato-replay-card"), helpers: !!window.loadCardHelpers,
+      card: !!(customElements.get("openneato-card") || customElements.get("openneato-replay-card")), helpers: !!window.loadCardHelpers,
       body: document.body?.innerText?.slice(0, 500),
     };
   })()`);
