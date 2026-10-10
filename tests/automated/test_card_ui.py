@@ -28,6 +28,7 @@ from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
 from homeassistant.components import websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
 
 UI = Path(__file__).parent / "ui"
@@ -156,6 +157,11 @@ async def test_card_ui(
     await hass.http.async_register_static_paths([StaticPathConfig(CARD_PATH, str(CARD_FILE), False)])
     websocket_api.async_register_command(hass, _fake_sessions)
     websocket_api.async_register_command(hass, _fake_session)
+    # Registered as an OpenNeato vacuum, as the integration would: the card finds
+    # the robot by that, and the editor's robot picker lists it
+    er.async_get(hass).async_get_or_create(
+        "vacuum", "openneato", "test_robot", suggested_object_id="test_robot"
+    )
     hass.states.async_set(VACUUM, "docked", {"friendly_name": "Test Robot", "fan_speed": "normal", "fan_speed_list": ["eco", "normal", "intense"]})
     await hass.async_block_till_done()
 

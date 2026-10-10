@@ -307,10 +307,21 @@
     await readyPicker(el);
   });
 
-  test("tile: without an entity, a plain title row stands in for the tile", hasTile, async () => {
+  test("tile: with no entity in the options, it finds the OpenNeato robot itself", hasTile, async () => {
     clearStage();
     forgetOpenState();
-    const el = mount({ collapsible: true, title: "Robot cleans" });
+    const el = mount({ collapsible: true });
+    await tileReady(el);
+    expect(deepText(tileOf(el).shadowRoot).includes("Test Robot"), "the tile does not show the robot");
+  });
+
+  test("tile: with no robot to find, a plain title row stands in for the tile", hasTile, async () => {
+    clearStage();
+    forgetOpenState();
+    const el = document.createElement("openneato-replay-card");
+    el.setConfig({ type: "custom:openneato-replay-card", height: 240, collapsible: true, title: "Robot cleans" });
+    el.hass = { ...hass(), entities: {} };
+    stage().append(el);
     await until(() => visible(el.shadowRoot.querySelector(".summary")), "the summary");
     expect(!tileOf(el), "a tile was made without an entity");
     expect(deepText(el.shadowRoot.querySelector(".summary")).includes("Robot cleans"), "the title is missing");
@@ -354,9 +365,10 @@
   test("editor: the form shows labelled options, with the defaults filled in", hasEditor, async () => {
     clearStage();
     const { form } = await hostedEditor({ type: "custom:openneato-replay-card", entity: VACUUM });
-    await until(() => deepText(form.shadowRoot).includes("Tile that opens the replay"), "the labels");
-    const text = deepText(form.shadowRoot);
-    for (const label of ["Title", "Map", "Parts of the card"]) expect(text.includes(label), `no ${label}`);
+    // The selectors load on demand, so each label shows up when its own part has loaded
+    for (const label of ["Tile that opens the replay", "Title", "Map", "Parts of the card"]) {
+      await until(() => deepText(form.shadowRoot).includes(label), `the label ${label}`);
+    }
     // The entity picker draws its label inside a component of its own
     expectEqual(form.computeLabel({ name: "entity" }), "Robot (vacuum)", "the picker's label");
     expectEqual(form.data.units, "auto", "the default units");
