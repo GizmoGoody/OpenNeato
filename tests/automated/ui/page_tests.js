@@ -29,7 +29,7 @@
     throw new Error(`Timed out waiting for ${what}${last ? ` (${last})` : ""}`);
   }
   // Same keys and values, whatever order the keys are in
-  const canon = (v) => (v && typeof v === "object" && !Array.isArray(v)
+  const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === "object"
     ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
   function expectEqual(actual, expected, what) {
     if (JSON.stringify(canon(actual)) !== JSON.stringify(canon(expected))) {
