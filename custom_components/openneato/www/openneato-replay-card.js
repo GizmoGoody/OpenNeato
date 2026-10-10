@@ -513,7 +513,6 @@ class OpenNeatoReplay extends HTMLElement {
                 .stats {
                     display: flex;
                     flex-wrap: nowrap;
-                    justify-content: space-between;
                     gap: 16px;
                     font-size: 0.8rem;
                     color: var(--secondary-text-color);
@@ -525,8 +524,14 @@ class OpenNeatoReplay extends HTMLElement {
                 .stats::-webkit-scrollbar {
                     display: none;
                 }
+                /* Even space around the figures when they fit; from the left
+                   when they do not (auto margins give way to nothing) */
                 .stats span {
                     white-space: nowrap;
+                    margin-left: auto;
+                }
+                .stats span:last-child {
+                    margin-right: auto;
                 }
                 .del {
                     flex: 0 0 auto;
@@ -658,15 +663,21 @@ class OpenNeatoReplay extends HTMLElement {
                     color: var(--live);
                     border: 1px solid var(--live);
                 }
-                .stage button.live {
+                /* The badge's corner is its wrapper's, so the badge's own
+                   redraws never move it; the same inset from both edges */
+                .livebox {
+                    --inset: 8px;
                     position: absolute;
                     z-index: 1;
+                    display: flex;
+                }
+                .livebox.top_left { top: var(--inset); left: var(--inset); }
+                .livebox.top_right { top: var(--inset); right: var(--inset); }
+                .livebox.bottom_left { bottom: var(--inset); left: var(--inset); }
+                .livebox.bottom_right { bottom: var(--inset); right: var(--inset); }
+                .livebox button.live {
                     background: var(--card-background-color);
                 }
-                .stage button.live.top_left { top: 8px; left: 8px; }
-                .stage button.live.top_right { top: 8px; right: 8px; }
-                .stage button.live.bottom_left { bottom: 8px; left: 8px; }
-                .stage button.live.bottom_right { bottom: 8px; right: 8px; }
                 button.live.on {
                     background: var(--live);
                     color: #fff;
@@ -743,7 +754,7 @@ class OpenNeatoReplay extends HTMLElement {
                 <div class="stage">
                     <canvas></canvas>
                     <div class="overlay">Loading…</div>
-                    <button class="live" hidden></button>
+                    <div class="livebox"><button class="live" hidden></button></div>
                 </div>
                 <div class="controls">
                     <button class="play" title="Play/Pause" disabled>
@@ -775,7 +786,7 @@ class OpenNeatoReplay extends HTMLElement {
         this._totalEl = root.querySelector(".total");
         this._scrub = root.querySelector(".scrub");
         this._liveBtn = root.querySelector(".live");
-        this._liveBtn.classList.add(this._config.live_position);
+        root.querySelector(".livebox").classList.add(this._config.live_position);
 
         this._stage.style.height = `${Number(this._config.height) || DEFAULTS.height}px`;
         this._picker.hidden = !this._config.show_picker;
