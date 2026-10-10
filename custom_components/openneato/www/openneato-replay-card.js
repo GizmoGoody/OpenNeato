@@ -113,7 +113,7 @@ const DEFAULTS = {
 // The Replay map feature's options as written in YAML, with their defaults.
 // Options that belong together are nested.
 const REPLAY_DEFAULTS = {
-    header: { selector: true, distance: true, duration: true, battery: true },
+    header: { selector: true, distance: true, duration: true, battery: true, hide_labels: true },
     autoplay: false,
     units: "auto",
     height: 360,
@@ -132,6 +132,7 @@ function replayOptions(c = {}) {
         show_distance: g("header", "distance"),
         show_duration: g("header", "duration"),
         show_battery: g("header", "battery"),
+        hide_labels: g("header", "hide_labels"),
         autoplay: c.autoplay ?? REPLAY_DEFAULTS.autoplay,
         units: c.units ?? REPLAY_DEFAULTS.units,
         height: c.height ?? REPLAY_DEFAULTS.height,
@@ -1291,6 +1292,9 @@ class OpenNeatoReplay extends HTMLElement {
         const units = this._units;
         const locale = this._locale();
         const bits = [];
+        const figure = (label, value) => (this._config.hide_labels
+            ? `<span title="${label}" aria-label="${label} ${value}"><b>${value}</b></span>`
+            : `<span>${label} <b>${value}</b></span>`);
         // Date, mode and area are all in the picker's own label
         // ("19/08 11:32 — House Clean · 27.3 m²"), so repeating them beside
         // it just spends the row saying the same thing twice. They come back
@@ -1299,7 +1303,7 @@ class OpenNeatoReplay extends HTMLElement {
             if (info.time) bits.push(`<span><b>${formatDate(info.time)}</b></span>`);
             bits.push(`<span>${modeLabel(info.mode)}</span>`);
             if (!this._live && s.areaCovered) {
-                bits.push(`<span>Area <b>${formatArea(s.areaCovered, units, locale)}</b></span>`);
+                bits.push(figure("Area", formatArea(s.areaCovered, units, locale)));
             }
         }
         if (this._live) {
@@ -1307,24 +1311,24 @@ class OpenNeatoReplay extends HTMLElement {
             // distance, end battery) is written when the clean ends.
             const since = (Date.now() - this._liveSince) / 1000;
             if (show("show_duration")) {
-                bits.push(`<span>Duration <b>${formatClock(this._session.duration + since)}</b></span>`);
+                bits.push(figure("Duration", formatClock(this._session.duration + since)));
             }
             if (show("show_battery")) {
-                if (info.battery !== undefined) bits.push(`<span>Battery <b>${info.battery}%</b></span>`);
+                if (info.battery !== undefined) bits.push(figure("Battery", `${info.battery}%`));
                 const recharges = this._session.recharges.length;
-                if (recharges > 0) bits.push(`<span>Recharges <b>${recharges}</b></span>`);
+                if (recharges > 0) bits.push(figure("Recharges", recharges));
             }
         } else {
             if (s.distanceTraveled && show("show_distance")) {
-                bits.push(`<span>Distance <b>${formatDistance(s.distanceTraveled, units, locale)}</b></span>`);
+                bits.push(figure("Distance", formatDistance(s.distanceTraveled, units, locale)));
             }
             const duration = s.duration || this._session.duration;
-            if (duration && show("show_duration")) bits.push(`<span>Duration <b>${formatClock(duration)}</b></span>`);
+            if (duration && show("show_duration")) bits.push(figure("Duration", formatClock(duration)));
             if (show("show_battery")) {
                 if (s.batteryStart !== undefined && s.batteryEnd !== undefined) {
-                    bits.push(`<span>Battery <b>${s.batteryStart}% → ${s.batteryEnd}%</b></span>`);
+                    bits.push(figure("Battery", `${s.batteryStart}% → ${s.batteryEnd}%`));
                 }
-                if (s.recharges) bits.push(`<span>Recharges <b>${s.recharges}</b></span>`);
+                if (s.recharges) bits.push(figure("Recharges", s.recharges));
             }
         }
         this._statsEl.innerHTML = bits.join("");
@@ -2973,6 +2977,7 @@ class OpenNeatoCard extends HTMLElement {
         return {
             type: `custom:${CARD_TYPE}`,
             ...(entity ? { entity } : {}),
+            state_content: DEFAULT_STATE_CONTENT,
             features: [{ type: `custom:${REPLAY_TYPE}` }, OpenNeatoControls.getStubConfig(hass, { entity_id: entity })],
         };
     }
@@ -3092,6 +3097,7 @@ const REPLAY_FIELDS = [
     ["distance", "header", "distance"],
     ["duration", "header", "duration"],
     ["battery", "header", "battery"],
+    ["hide_labels", "header", "hide_labels"],
     ["autoplay", null, "autoplay"],
     ["units", null, "units"],
     ["height", null, "height"],
@@ -3120,6 +3126,7 @@ const FEATURE_FORMS = {
                 toggle("distance", "Distance"),
                 toggle("duration", "Duration"),
                 toggle("battery", "Battery"),
+                toggle("hide_labels", "Hide labels", "Show the figures without their names; the names show on hover."),
                 toggle("autoplay", "Autoplay"),
                 { name: "units", label: "Units", required: true, selector: select([["auto", "Auto"], ["metric", "Metric"], ["imperial", "US customary"]]) },
                 { name: "height", label: "Height", selector: { number: { mode: "box", min: 120, max: 1200, step: 10, unit_of_measurement: "px" } } },
@@ -3295,7 +3302,8 @@ function tileEditorType() {
 
 // What the tile card's editor is given: the card without its own option
 function tileEditorConfig(config) {
-    const tile = { ...config, type: "tile" };
+    // The card's State content, not the tile card's, when the YAML leaves it out
+    const tile = { ...config, type: "tile", state_content: config.state_content ?? DEFAULT_STATE_CONTENT };
     for (const key of OWN_KEYS) delete tile[key];
     delete tile.tap_action;
     return tile;
