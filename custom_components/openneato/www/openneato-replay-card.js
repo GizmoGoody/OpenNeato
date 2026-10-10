@@ -3154,25 +3154,17 @@ const FEATURE_FORMS = {
         data: (c) => Object.fromEntries(REPLAY_FIELDS.map(([field, group, key]) => [
             field, (group ? c[group]?.[key] : c[key]) ?? replayDefault(group, key),
         ])),
-        // Only what differs from the defaults is written, nested where it belongs,
-        // and a group left with nothing in it is removed
+        // What the person changed is written, nested where it belongs, even when
+        // it is the default; options left alone stay as they are in the YAML
         save: (v, c) => {
             const out = { ...c };
             for (const [field, group, key] of REPLAY_FIELDS) {
+                const shown = (group ? c[group]?.[key] : c[key]) ?? replayDefault(group, key);
                 let value = v[field];
-                if (field === "degrees" || field === "height") value = value === undefined || value === "" ? undefined : Number(value);
-                const fallback = replayDefault(group, key);
-                const unchanged = value === undefined || value === "" || String(value) === String(fallback);
-                if (!group) {
-                    if (unchanged) delete out[key];
-                    else out[key] = value;
-                    continue;
-                }
-                const next = { ...(out[group] ?? {}) };
-                if (unchanged) delete next[key];
-                else next[key] = value;
-                if (Object.keys(next).length) out[group] = next;
-                else delete out[group];
+                if (value === undefined || value === "" || String(value) === String(shown)) continue;
+                if (field === "degrees" || field === "height") value = Number(value);
+                if (group) out[group] = { ...(out[group] ?? {}), [key]: value };
+                else out[key] = value;
             }
             return out;
         },
@@ -3340,9 +3332,7 @@ class OpenNeatoCardEditor extends HTMLElement {
         this._form.schema = [toggle("expanded", "Expanded on load")];
         this._form.addEventListener("value-changed", (ev) => {
             ev.stopPropagation();
-            const next = { ...this._config };
-            if (ev.detail.value.expanded) next.expanded = true;
-            else delete next.expanded;
+            const next = { ...this._config, expanded: ev.detail.value.expanded === true };
             this._config = next;
             this._render();
             this._fire();
