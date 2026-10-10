@@ -175,6 +175,15 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
   | `units` | `auto` | `auto` follows the Home Assistant unit system (`ft`/`ft²` on US customary, `m`/`m²` otherwise); `metric` or `imperial` overrides it. |
   | `show_picker` | `true` | Session dropdown and delete button. Hiding it puts the date, mode and area back into the stats row. |
   | `show_stats` | `true` | Distance, duration, battery and recharges beside the picker. |
+  | `collapsible` | `false` | Put a tile card on top (the robot's icon, name and state, like any tile card) that opens and closes the replay with a tap on the tile or on the arrow. Closed, the card loads nothing from the robot and draws nothing. The choice is remembered in the browser. |
+  | `expanded` | `false` | With `collapsible`, whether the replay starts open, until the person has chosen. |
+  | `entity` | *(the OpenNeato vacuum)* | With `collapsible`, the vacuum the tile card shows. Found automatically when there is one robot. |
+
+  With `collapsible`, the tile card's own options also work: `name`, `icon`, `color`, `state_content`,
+  `vertical`, `hide_state`, `show_entity_picture`, `features`, `features_position`, `hold_action`,
+  `double_tap_action` and the three `icon_` actions. `tap_action` is not available, because a tap on the
+  tile opens and closes the replay. Without a vacuum to show, a plain title row stands in for the tile.
+  Do not combine `collapsible` with `height: fill`.
 
   The session picker shows only the date and time of the session on screen while it is closed, and the
   full line (date, mode, area) for every session while its list is open. A session that was recorded
@@ -188,6 +197,14 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
   grid: false
   units: imperial
   height: fill
+  ```
+
+  Example — a tile that opens the replay:
+
+  ```yaml
+  type: custom:openneato-replay-card
+  collapsible: true
+  units: imperial
   ```
 - **Reading the diagnostics** — two field names are misleading and the integration corrects for them:
   `errorCode` returns **200** (`UI_ALERT_INVALID`) when nothing is wrong, so the *Error code* sensor
