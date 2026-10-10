@@ -156,7 +156,7 @@ async def test_card_ui(
     await hass.http.async_register_static_paths([StaticPathConfig(CARD_PATH, str(CARD_FILE), False)])
     websocket_api.async_register_command(hass, _fake_sessions)
     websocket_api.async_register_command(hass, _fake_session)
-    hass.states.async_set(VACUUM, "docked", {"friendly_name": "Test Robot", "battery_level": 90})
+    hass.states.async_set(VACUUM, "docked", {"friendly_name": "Test Robot", "fan_speed": "normal", "fan_speed_list": ["eco", "normal", "intense"]})
     await hass.async_block_till_done()
 
     client = await hass_client()
