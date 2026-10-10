@@ -232,13 +232,6 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
     - navigation_mode
   ```
 
-  Example — a tile that opens the replay:
-
-  ```yaml
-  type: custom:openneato-replay-card
-  collapsible: true
-  units: imperial
-  ```
 - **Reading the diagnostics** — two field names are misleading and the integration corrects for them:
   `errorCode` returns **200** (`UI_ALERT_INVALID`) when nothing is wrong, so the *Error code* sensor
   reports *unknown* instead; and `chargerMAH` / `dischargeMAH` are **milliamps, not milliamp-hours**
