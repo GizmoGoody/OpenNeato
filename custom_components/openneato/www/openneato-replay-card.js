@@ -118,7 +118,15 @@ function formatClock(secs) {
     return h > 0 ? `${h}:${pad2(m)}:${pad2(s)}` : `${m}:${pad2(s)}`;
 }
 
+// Until the bridge has real time (NTP, or the robot's clock) it stamps a clean
+// with seconds since it booted, which would read as a day in early January
+// 1970. The firmware treats anything below this as "clock not set"; so does the
+// card, rather than showing a date that is plainly wrong.
+const CLOCK_SET_MIN_EPOCH = 1700000000;
+const UNKNOWN_DATE = "Date unknown";
+
 function formatDate(epoch) {
+    if (!(epoch >= CLOCK_SET_MIN_EPOCH)) return UNKNOWN_DATE;
     const d = new Date(epoch * 1000);
     return d.toLocaleString(undefined, {
         day: "2-digit",
@@ -755,7 +763,20 @@ class OpenNeatoReplayCard extends HTMLElement {
             // off it onto a clean that is already running.
             this._userPicked = true;
             this._selectSession(this._picker.value);
+            this._setPickerOpen(false);
         });
+        // The list opens on a press or a key; see _setPickerOpen
+        for (const type of ["pointerdown", "mousedown", "touchstart"]) {
+            this._picker.addEventListener(type, () => this._setPickerOpen(true), { passive: true });
+        }
+        this._picker.addEventListener("keydown", (ev) => {
+            if (ev.key === "Escape" || ev.key === "Enter" || ev.key === "Tab") this._setPickerOpen(false);
+            // An arrow alone changes the selection on a closed picker; Alt+arrow and Space open the list
+            else if (ev.key === " " || (ev.altKey && (ev.key === "ArrowDown" || ev.key === "ArrowUp"))) {
+                this._setPickerOpen(true);
+            }
+        });
+        this._picker.addEventListener("blur", () => this._setPickerOpen(false));
         this._delBtn.addEventListener("click", () => this._deleteSelected());
         this._playBtn.addEventListener("click", () => this._togglePlay());
         this._restartBtn.addEventListener("click", () => this._restart());
@@ -1049,10 +1070,15 @@ class OpenNeatoReplayCard extends HTMLElement {
         await this._loadSessions();
     }
 
+    // The session's date and time, which is all the picker shows while it is closed.
+    _sessionDate(s) {
+        return formatDate((s.session && s.session.time) || Number(String(s.name).split(".")[0]));
+    }
+
+    // The full line shown for each session while the list is open.
     _sessionLabel(s) {
-        const start = (s.session && s.session.time) || Number(String(s.name).split(".")[0]);
         const area = s.summary && s.summary.areaCovered;
-        let label = `${formatDate(start)} — ${modeLabel(s.session && s.session.mode)}`;
+        let label = `${this._sessionDate(s)} — ${modeLabel(s.session && s.session.mode)}`;
         // No area while recording: the summary is written when the clean
         // ends, and the word says what the picker cannot style.
         if (s.recording) label += " · Live";
@@ -1065,12 +1091,49 @@ class OpenNeatoReplayCard extends HTMLElement {
     // the delete confirmation at the wrong session.
     _renderPicker() {
         if (!this._picker) return;
-        const rows = this._sessions.map((s) => [s.name, this._sessionLabel(s)]);
-        const sig = `${rows.map(([name, label]) => `${name}|${label}`).join("\n")}|${this._units}`;
+        const rows = this._sessions.map((s) => ({
+            name: s.name,
+            full: this._sessionLabel(s),
+            date: this._sessionDate(s),
+        }));
+        const sig = `${rows.map((r) => `${r.name}|${r.full}`).join("\n")}|${this._units}`;
         if (sig === this._pickerSig) return;
         this._pickerSig = sig;
-        this._picker.innerHTML = rows.map(([name, label]) => `<option value="${name}">${label}</option>`).join("");
+        this._pickerRows = rows;
+        this._picker.replaceChildren(
+            ...rows.map((r) => {
+                const option = document.createElement("option");
+                option.value = r.name;
+                return option;
+            }),
+        );
         if (this._selectedName) this._picker.value = this._selectedName;
+        this._applyPickerText();
+    }
+
+    // Closed, the picker shows only the date and time of the session on screen
+    // (the rest of the line is the mode and area, which the stats row and the
+    // open list already give). Open, every session shows its full line.
+    //
+    // A <select> has no event for its list opening or closing, so this follows
+    // the events that lead there. Opening is certain (the press or key comes
+    // first); closing without a choice, or by choosing the session already
+    // selected, fires no event, so the full lines stay until the picker loses
+    // focus. The width is held while the list is open so the header does not
+    // jump when the text grows.
+    _setPickerOpen(open) {
+        if (open === this._pickerOpen) return;
+        this._pickerOpen = open;
+        if (open) this._picker.style.width = `${this._picker.offsetWidth}px`;
+        else this._picker.style.width = "";
+        this._applyPickerText();
+    }
+
+    _applyPickerText() {
+        const options = this._picker.options;
+        (this._pickerRows || []).forEach((r, i) => {
+            if (options[i]) options[i].textContent = this._pickerOpen ? r.full : r.date;
+        });
     }
 
     _fetchSession(name) {

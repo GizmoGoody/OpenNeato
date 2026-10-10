@@ -176,6 +176,11 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
   | `show_picker` | `true` | Session dropdown and delete button. Hiding it puts the date, mode and area back into the stats row. |
   | `show_stats` | `true` | Distance, duration, battery and recharges beside the picker. |
 
+  The session picker shows only the date and time of the session on screen while it is closed, and the
+  full line (date, mode, area) for every session while its list is open. A session that was recorded
+  before the bridge had the real time (NTP not synced, and no robot clock) shows as *Date unknown*, because
+  the bridge could only stamp it with seconds since it booted. Check *NTP synced* on the bridge's device.
+
   Example — a flat, imperial card pinned to the live/latest session:
 
   ```yaml
