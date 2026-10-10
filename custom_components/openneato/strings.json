@@ -396,7 +396,7 @@
   "issues": {
     "unsupported_firmware": {
       "title": "Unsupported OpenNeato firmware",
-      "description": "The bridge at {host} reports firmware {version} from {repository}. This integration is built for the Leicas/OpenNeato fork firmware ({min_version} or newer); upstream or older firmware may miss endpoints, and heavy polling can make the ESP32 unresponsive. Flash the fork firmware from https://github.com/Leicas/OpenNeato/releases."
+      "description": "The bridge at {host} reports firmware {version} from {repository}. This integration is built for the Leicas/OpenNeato fork firmware ({min_version} or newer); upstream or older firmware may miss endpoints, and heavy polling can make the ESP32 unresponsive. Flash the fork firmware from {releases_url}."
     }
   }
 }

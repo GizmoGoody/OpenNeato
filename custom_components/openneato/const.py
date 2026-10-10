@@ -31,6 +31,9 @@ ACTIVE_UISTATE_SUBSTRINGS = (
 # builds report two-part 0.x versions and lack several endpoints; they are
 # flagged with a repair issue rather than refused (see firmware_check.py).
 FORK_MIN_VERSION = (1, 11, 1)
+# Where the repair issue sends people to get the fork firmware. It is passed as
+# a placeholder because Home Assistant does not allow URLs inside translations.
+FORK_RELEASES_URL = "https://github.com/Leicas/OpenNeato/releases"
 
 # ── Replay card live session ────────────────────────────────────────
 # A recording session is re-downloaded from the bridge at most once per TTL,

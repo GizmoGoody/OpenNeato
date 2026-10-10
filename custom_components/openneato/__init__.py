@@ -22,6 +22,7 @@ from .const import (
     CONF_MAP_ENABLED,
     DOMAIN,
     FORK_MIN_VERSION,
+    FORK_RELEASES_URL,
     MAP_DEFAULT_ENABLED,
 )
 from .coordinator import OpenNeatoCoordinator
@@ -105,6 +106,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "version": str(firmware_info.get("version", "?")),
                 "repository": str(firmware_info.get("repositoryUrl", "?")),
                 "min_version": ".".join(str(part) for part in FORK_MIN_VERSION),
+                "releases_url": FORK_RELEASES_URL,
             },
         )
     else:
