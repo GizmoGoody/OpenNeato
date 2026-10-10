@@ -3114,15 +3114,16 @@ const FEATURE_FORMS = {
             toggle("show_distance", "Distance"),
             toggle("show_duration", "Duration"),
             toggle("show_battery", "Battery"),
-            { name: "units", label: "Units", selector: select([["auto", "Auto"], ["metric", "Metric"], ["imperial", "US customary"]]) },
+            { name: "units", label: "Units", required: true, selector: select([["auto", "Auto"], ["metric", "Metric"], ["imperial", "US customary"]]) },
             { name: "height", label: "Height", selector: { number: { mode: "box", min: 120, max: 1200, step: 10, unit_of_measurement: "px" } } },
             {
-                name: "fit", label: "Framing",
+                name: "fit", label: "Framing", required: true,
                 selector: select([["stable", "Stable between cleanings"], ["plan", "Whole floorplan"], ["session", "This session only"]]),
             },
             {
-                name: "rotation", label: "Rotation",
-                selector: select([["auto", "Straighten against the walls"], ["0", "0°"], ["90", "90°"], ["180", "180°"], ["270", "270°"]], { custom_value: true }),
+                // Any other angle can be set in YAML
+                name: "rotation", label: "Rotation", required: true,
+                selector: select([["auto", "Straighten against the walls"], ["0", "0°"], ["90", "90°"], ["180", "180°"], ["270", "270°"]]),
             },
             toggle("floorplan", "Floorplan"),
             { name: "floorplan_opacity", label: "Floorplan opacity", selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } } },
