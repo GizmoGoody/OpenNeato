@@ -119,8 +119,8 @@ A single device with the following entity groups:
 
 - **Vacuum** (`vacuum.openneato_<name>`) — start/stop/pause/dock/locate/spot-clean, battery level, status,
   fan speed presets (Eco/Auto/Intense), error reporting. Works with all the standard vacuum cards.
-- **Map card** — [`openneato-replay-card`](custom_components/openneato/www/openneato-replay-card.js), a
-  canvas Lovelace card that draws the accumulated LIDAR floorplan and replays a cleaning session over it,
+- **OpenNeato card** — [`openneato-card`](custom_components/openneato/www/openneato-replay-card.js): the
+  robot's tile, with features under it, among them a canvas map that draws the accumulated LIDAR floorplan and replays a cleaning session over it,
   with pan, zoom and a timeline scrubber. A clean that is in progress shows as a live map — the card follows
   the robot every few seconds, with a ● Live chip in the controls — and turns into a normal replay the moment
   it finishes. It reads the `openneato/session` and `openneato/sessions` websocket commands directly, so
@@ -149,75 +149,99 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
 
 - **Installing the map card** — nothing to install: the integration serves the card itself and
   adds it to the dashboard resources on startup, even while the robot is offline (so the card and its
-  WebSocket API can never fall out of version sync). Just add a manual card with `type: custom:openneato-replay-card` to any dashboard.
+  WebSocket API can never fall out of version sync). Just add the *OpenNeato* card to any dashboard.
   If the dashboards are in YAML mode, the card is loaded on every page instead. If registration ever fails (see the log), add `/openneato_static/openneato-replay-card.js` as a
   JavaScript-module resource manually. The walls come from the integration's own LIDAR mapper, which
   accumulates an occupancy grid across cleanings — the plan sharpens with each run.
-- **The card** — add *OpenNeato* from the card picker, or in YAML. It takes the tile card's options
-  (`entity`, `name`, `icon`, `color`, `state_content`, `features`, `features_position`, `vertical` and the
-  actions other than `tap_action`), and one of its own: `expanded`. A tap on the card shows or hides its
-  features, and the browser remembers the choice.
+- **The card** — add *OpenNeato* from the card picker. A tap on the card shows or hides its
+  features, and the browser remembers the choice. Every option, with its default:
 
   ```yaml
-  type: custom:openneato-replay-card
-  entity: vacuum.alfred
+  type: custom:openneato-card
+  entity: vacuum.alfred          # the first OpenNeato vacuum
+  name: Alfred                   # the entity's name
+  icon: mdi:robot-vacuum         # the entity's icon
+  color: state
+  show_entity_picture: false
+  vertical: false
+  hide_state: false
   state_content:
     - state
     - charging
     - battery
+  features_position: bottom
+  icon_tap_action:
+    action: none
+  hold_action:
+    action: none
+  double_tap_action:
+    action: none
+  icon_hold_action:
+    action: none
+  icon_double_tap_action:
+    action: none
+  expanded: false
   features:
     - type: custom:openneato-replay
+      header:
+        selector: true
+        distance: true
+        duration: true
+        battery: true
+      autoplay: false
+      units: auto
+      height: 360
+      fit: stable
+      rotation:
+        straighten: true
+        degrees: 0
+      floorplan:
+        show: true
+        tiled: true
+        opacity: 1
+      grid: true
+      coverage:
+        trail: true
+        tiled: true
     - type: custom:openneato-controls
-      items:
-        - start
-        - pause
-        - dock
+      items: [start, pause, stop, dock, spot, locate]
     - type: custom:openneato-suction
+      fan_speeds: [eco, normal, intense]
     - type: custom:openneato-configuration
-      items:
-        - stealth_led
-        - navigation_mode
+      items: [stealth_led, navigation_mode]
+  grid_options:
+    columns: full
   ```
 
-  | Option | Default | What it does |
-  |---|---|---|
-  | `expanded` | `false` | Show the features when the page loads, until the person has chosen in this browser. |
-  | `state_content` | `state`, `charging`, `battery` | `state`, and any sensor of the robot by its key, such as `charging`, `battery` (the battery level), `wifi_signal`, `uptime`, `last_clean_area` and `error_message`. |
+  The options above `expanded` are the tile card's (there is no `tap_action`: a tap shows or hides
+  the features). `state_content` takes `state` and any sensor of the robot by its key, such as
+  `charging`, `battery`, `wifi_signal`, `uptime`, `last_clean_area` and `error_message`. `expanded`
+  shows the features when the page loads, until the person has chosen in this browser. The card is
+  full width unless its layout says otherwise.
 
-  The features also work in any tile card for the robot:
+  Each feature is optional, and each also works in any tile card for the robot.
 
-  | Feature | Options |
+  | Replay map option | What it does |
   |---|---|
-  | `custom:openneato-replay` | The replay of a cleaning session (below). |
-  | `custom:openneato-controls` | `items`: `start`, `pause`, `stop`, `dock`, `spot`, `locate`, in the order given. |
-  | `custom:openneato-suction` | `fan_speeds`: the suction levels to show, in the order given (all of them by default). |
-  | `custom:openneato-configuration` | `items`: the robot's switches and choices by key, such as `stealth_led` and `navigation_mode`, in the order given. Eco mode and Intense clean are not offered here, because they are the suction levels. |
+  | `header` | The row above the map: the session `selector` (when hidden, the map shows the latest run and follows a clean as it starts), and the session's `distance`, `duration` and `battery`. |
+  | `autoplay` | Play from the beginning as soon as a session loads. A session that is still recording is followed live instead. |
+  | `units` | `auto` follows the Home Assistant unit system; `metric` or `imperial` overrides it. |
+  | `height` | Map height in px. |
+  | `fit` | `stable` frames the cleaned area on a 1 m grid so the view stops shifting between cleanings; `plan` keeps the whole floorplan in view; `session` is the tightest fit. |
+  | `rotation` | `straighten` turns the map so the walls line up with the card, then turns it a quarter if that fills the card better; `degrees` is added to that angle. Without `straighten`, `degrees` is the map's angle. |
+  | `floorplan` | The walls (the floorplan the integration builds from the robot's LIDAR): `show`, `tiled` (square tiles, as in the Neato app, or smooth), and `opacity` (`0` to `1`). |
+  | `grid` | The half-metre background grid. |
+  | `coverage` | The cleaned area: `trail` (the fading track behind the robot), and `tiled` (coverage and trail as square tiles, or smooth). |
+  | `entry_id` | Which OpenNeato config entry to read when there is more than one robot. |
 
-  Replay map options, in the order they show on the card:
+  Controls `items` are the vacuum's commands. Suction `fan_speeds` are the levels to show (all of them
+  when it is left out). Configuration `items` are the robot's switches and choices by key; Eco mode and
+  Intense clean are not among them, because they are the suction levels.
 
-  | Option | Default | What it does |
-  |---|---|---|
-  | `show_picker` | `true` | The session dropdown and delete button. When hidden, the map shows the latest run and follows a clean as it starts, and the date, mode and area show beside it. |
-  | `show_distance` | `true` | The distance of the session. |
-  | `show_duration` | `true` | The duration of the session. |
-  | `show_battery` | `true` | The battery before and after, and the recharges. |
-  | `units` | `auto` | `auto` follows the Home Assistant unit system; `metric` or `imperial` overrides it. |
-  | `height` | `360` | Map height in px. |
-  | `fit` | `stable` | `stable` frames the cleaned area on a 1 m grid so the view stops shifting between cleanings; `plan` keeps the whole floorplan in view; `session` is the tightest fit. |
-  | `rotation` | `auto` | `auto` straightens the map against its walls; a number in degrees pins the view. |
-  | `floorplan` | `true` | Draw the walls (the floorplan the integration builds from the robot's LIDAR) under the session. |
-  | `floorplan_opacity` | `1` | Opacity of the floorplan, `0` to `1`. |
-  | `grid_lines` | `true` | Half-metre grid lines. |
-  | `tiled_plan` | `true` | The floorplan drawn as square tiles, as in the Neato app. `false` draws it smooth. |
-  | `tiled_coverage` | `true` | The coverage and trail drawn as square tiles. `false` draws a smooth swept area and a rounded track. |
-  | `trail` | `true` | Fading track behind the robot. |
-  | `autoplay` | `false` | Play from the beginning as soon as a session loads. A session that is still recording is followed live instead. |
-  | `entry_id` | *(first entry)* | Which OpenNeato config entry to read when there is more than one robot. YAML only. |
-
-  The playback speed button on the map remembers its choice in the browser. The session picker shows only
-  the date and time of the session on screen while it is closed, and the full line for every session while
-  its list is open. A session recorded before the bridge had the real time (NTP not synced, and no robot
-  clock) shows as *Date unknown*. Check *NTP synced* on the bridge's device.
+  The playback speed button on the map remembers its choice in the browser. The session selector shows
+  only the date and time of the session on screen while it is closed, and the full line for every
+  session while its list is open. A session recorded before the bridge had the real time (NTP not
+  synced, and no robot clock) shows as *Date unknown*. Check *NTP synced* on the bridge's device.
 - **Reading the diagnostics** — two field names are misleading and the integration corrects for them:
   `errorCode` returns **200** (`UI_ALERT_INVALID`) when nothing is wrong, so the *Error code* sensor
   reports *unknown* instead; and `chargerMAH` / `dischargeMAH` are **milliamps, not milliamp-hours**
