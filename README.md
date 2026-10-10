@@ -153,7 +153,9 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
   If auto-registration ever fails (see the log), add `/openneato_static/openneato-replay-card.js` as a
   JavaScript-module resource manually. The walls come from the integration's own LIDAR mapper, which
   accumulates an occupancy grid across cleanings — the plan sharpens with each run.
-- **Card options** — all optional; `type: custom:openneato-replay-card` alone gives the defaults.
+- **Card options** — all optional; `type: custom:openneato-replay-card` alone gives the defaults. The dashboard's card editor
+  has a form for the common ones (robot, tile, title, units, height, framing, speed and the on/off parts); the
+  tile card's own options, a pinned `session` and `height: fill` are set in YAML and the form leaves them as they are.
 
   | Option | Default | What it does |
   |---|---|---|

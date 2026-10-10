@@ -303,6 +303,180 @@ class Session {
     }
 }
 
+/* ── the visual editor ──────────────────────────────────────────────── */
+
+// Home Assistant's form component and its selectors load with the dashboard
+// editor, not with a custom card. The tile card's own editor pulls in the same
+// parts, so asking for it first makes sure they are there.
+async function loadEditorParts() {
+    if (customElements.get("ha-form") && customElements.get("ha-selector")) return;
+    const helpers = await window.loadCardHelpers?.();
+    if (!helpers) return;
+    helpers.createCardElement({ type: "tile", entity: "sun.sun" });
+    await customElements.whenDefined("hui-tile-card");
+    await customElements.get("hui-tile-card").getConfigElement?.();
+}
+
+const EDITOR_LABELS = {
+    entity: "Robot (vacuum)",
+    collapsible: "Tile that opens the replay",
+    expanded: "Start open",
+    title: "Title",
+    state_content: "State content",
+    units: "Units",
+    height: "Map height (px)",
+    fit: "Framing",
+    speed: "Playback speed",
+    autoplay: "Play automatically",
+    grid: "Neato-app look (grid lines and tiles)",
+    trail: "Fading track behind the robot",
+    show_picker: "Session picker",
+    show_stats: "Distance, duration and battery",
+};
+
+const EDITOR_HELPERS = {
+    entity: "The vacuum the tile shows. Found by itself when there is one robot.",
+    collapsible: "Show a tile card on top. A tap on it opens and closes the replay, which loads nothing while closed.",
+    expanded: "Whether the replay starts open, until you have chosen in this browser.",
+    title: "Header text. Leave empty for the default; the tile replaces it when the replay opens and closes.",
+    height: "For a map that fills the space, use YAML (height: fill).",
+    speed: "Session seconds per real second. 1 is real time.",
+};
+
+function editorSchema(config) {
+    const choice = (options) => ({ select: { mode: "dropdown", options } });
+    const schema = [
+        { name: "entity", selector: { entity: { domain: "vacuum", integration: "openneato" } } },
+        { name: "collapsible", selector: { boolean: {} } },
+    ];
+    if (config.collapsible) {
+        schema.push({ name: "expanded", selector: { boolean: {} } });
+    }
+    schema.push({ name: "title", selector: { text: {} } });
+    if (config.collapsible && config.entity) {
+        schema.push({ name: "state_content", selector: { ui_state_content: { entity_id: config.entity, allow_name: false } } });
+    }
+    schema.push({
+        type: "expandable",
+        name: "",
+        title: "Map",
+        flatten: true,
+        schema: [
+            {
+                name: "units",
+                selector: choice([
+                    { value: "auto", label: "Follow Home Assistant" },
+                    { value: "metric", label: "Metric" },
+                    { value: "imperial", label: "Imperial" },
+                ]),
+            },
+            { name: "height", selector: { number: { min: 120, max: 1200, step: 10, mode: "box", unit_of_measurement: "px" } } },
+            {
+                name: "fit",
+                selector: choice([
+                    { value: "stable", label: "Stable (steady between cleanings)" },
+                    { value: "plan", label: "Whole floorplan" },
+                    { value: "session", label: "Tight on this session" },
+                ]),
+            },
+            { name: "speed", selector: { number: { min: 1, max: 64, step: 1, mode: "box" } } },
+            { name: "autoplay", selector: { boolean: {} } },
+            { name: "grid", selector: { boolean: {} } },
+            { name: "trail", selector: { boolean: {} } },
+        ],
+    });
+    schema.push({
+        type: "expandable",
+        name: "",
+        title: "Parts of the card",
+        flatten: true,
+        schema: [
+            { name: "show_picker", selector: { boolean: {} } },
+            { name: "show_stats", selector: { boolean: {} } },
+        ],
+    });
+    return schema;
+}
+
+// What the form shows: the defaults under what is set. A height of "fill" has
+// no place in a number box, so it is left out (and left alone, see below).
+function editorData(config) {
+    const data = { ...DEFAULTS, ...config };
+    if (typeof data.height !== "number") delete data.height;
+    delete data.type;
+    delete data.session;
+    return data;
+}
+
+class OpenNeatoReplayCardEditor extends HTMLElement {
+    constructor() {
+        super();
+        this.attachShadow({ mode: "open" });
+        this._config = { type: "custom:openneato-replay-card" };
+        this._hass = null;
+    }
+
+    setConfig(config) {
+        this._config = config;
+        this._render();
+    }
+
+    set hass(hass) {
+        this._hass = hass;
+        if (this._form) this._form.hass = hass;
+    }
+
+    connectedCallback() {
+        this._render();
+    }
+
+    async _render() {
+        if (!this.isConnected && !this._form) return;
+        if (!this._form) {
+            this._form = document.createElement("ha-form");
+            this._form.computeLabel = (item) => EDITOR_LABELS[item.name] ?? item.title ?? item.name;
+            this._form.computeHelper = (item) => EDITOR_HELPERS[item.name];
+            this._form.addEventListener("value-changed", (ev) => this._changed(ev));
+            this.shadowRoot.replaceChildren(this._form);
+            try {
+                await loadEditorParts();
+            } catch (err) {
+                console.warn("openneato-replay-card: editor parts did not load", err);
+            }
+        }
+        this._form.hass = this._hass;
+        this._shown = editorData(this._config);
+        this._form.data = this._shown;
+        this._form.schema = editorSchema(this._config);
+    }
+
+    // Only what the person changed goes into the configuration. Everything
+    // else (a pinned session, height: fill, the tile card's own options) stays
+    // exactly as it was in the YAML, and a value set back to its default is
+    // dropped so the YAML stays short.
+    _changed(ev) {
+        ev.stopPropagation();
+        const value = ev.detail.value;
+        const config = { ...this._config };
+        for (const key of Object.keys(value)) {
+            if (JSON.stringify(value[key]) === JSON.stringify(this._shown[key])) continue;
+            const v = value[key];
+            if (v === undefined || v === "" || v === null || (key in DEFAULTS && JSON.stringify(DEFAULTS[key]) === JSON.stringify(v))) {
+                delete config[key];
+            } else {
+                config[key] = v;
+            }
+        }
+        for (const key of Object.keys(this._shown)) if (!(key in value)) delete config[key];
+        this._config = config;
+        this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
+    }
+}
+
+if (!customElements.get("openneato-replay-card-editor")) {
+    customElements.define("openneato-replay-card-editor", OpenNeatoReplayCardEditor);
+}
+
 /* ── the card ───────────────────────────────────────────────────────── */
 
 class OpenNeatoReplayCard extends HTMLElement {
@@ -375,6 +549,10 @@ class OpenNeatoReplayCard extends HTMLElement {
     }
 
     /* ---- Lovelace plumbing ---- */
+
+    static getConfigElement() {
+        return document.createElement("openneato-replay-card-editor");
+    }
 
     static getStubConfig() {
         return { type: "custom:openneato-replay-card" };
