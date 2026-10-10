@@ -315,6 +315,101 @@
     await until(() => visible(drawer(el)), "the replay to show");
   });
 
+  /* ── visual editor ───────────────────────────────────────────────────── */
+
+  const hasEditor = () => source().includes("openneato-replay-card-editor");
+  const EDITOR = "openneato-replay-card-editor";
+
+  // An editor as the dashboard hosts it: every saved configuration is handed
+  // back to it, and kept here for the test to check
+  async function hostedEditor(config) {
+    const el = document.createElement(EDITOR);
+    el.hass = hass();
+    el.setConfig(config);
+    const saved = [];
+    el.addEventListener("config-changed", (ev) => {
+      saved.push(ev.detail.config);
+      el.setConfig(ev.detail.config);
+    });
+    stage().append(el);
+    const form = await until(() => {
+      const f = el.shadowRoot.querySelector("ha-form");
+      return f?.schema?.length && f;
+    }, "the editor's form");
+    return { el, form, saved };
+  }
+  const fieldNames = (form) => form.schema.flatMap((item) => (item.schema ? item.schema.map((x) => x.name) : [item.name]));
+  const edit = (form, changes) => form.dispatchEvent(new CustomEvent("value-changed", { detail: { value: { ...form.data, ...changes } } }));
+  const last = (saved) => saved[saved.length - 1];
+
+  test("editor: the card offers it to the dashboard", hasEditor, async () => {
+    const card = customElements.get("openneato-replay-card");
+    expectEqual(card.getConfigElement().tagName.toLowerCase(), EDITOR, "the editor element");
+    expect(customElements.get(EDITOR), "the editor is not defined");
+  });
+
+  test("editor: the form shows labelled options, with the defaults filled in", hasEditor, async () => {
+    clearStage();
+    const { form } = await hostedEditor({ type: "custom:openneato-replay-card", entity: VACUUM });
+    await until(() => deepText(form.shadowRoot).includes("Tile that opens the replay"), "the labels");
+    const text = deepText(form.shadowRoot);
+    for (const label of ["Robot (vacuum)", "Title", "Map", "Parts of the card"]) expect(text.includes(label), `no ${label}`);
+    expectEqual(form.data.units, "auto", "the default units");
+    expectEqual(form.data.collapsible, false, "the default for the tile");
+    expectEqual(form.data.show_picker, true, "the default for the picker");
+  });
+
+  test("editor: start state and state content appear only with the tile", hasEditor, async () => {
+    clearStage();
+    const { form } = await hostedEditor({ type: "custom:openneato-replay-card", entity: VACUUM });
+    expect(!fieldNames(form).includes("expanded"), "expanded shown without the tile");
+    expect(!fieldNames(form).includes("state_content"), "state content shown without the tile");
+    edit(form, { collapsible: true });
+    await until(() => fieldNames(form).includes("expanded") && fieldNames(form).includes("state_content"), "the tile's fields");
+  });
+
+  test("editor: what the form does not know stays exactly as it was", hasEditor, async () => {
+    clearStage();
+    const features = [{ type: "custom:something" }];
+    const { form, saved } = await hostedEditor({
+      type: "custom:openneato-replay-card", session: "4020.jsonl", height: "fill", name: "Alfred", features,
+    });
+    edit(form, { units: "imperial" });
+    expectEqual(last(saved), {
+      type: "custom:openneato-replay-card", session: "4020.jsonl", height: "fill", name: "Alfred", features, units: "imperial",
+    }, "the saved configuration");
+  });
+
+  test("editor: a value set back to its default is dropped", hasEditor, async () => {
+    clearStage();
+    const { form, saved } = await hostedEditor({ type: "custom:openneato-replay-card" });
+    edit(form, { units: "imperial", speed: 16 });
+    expectEqual(last(saved), { type: "custom:openneato-replay-card", units: "imperial", speed: 16 }, "after the change");
+    edit(form, { units: "auto" });
+    expectEqual(last(saved), { type: "custom:openneato-replay-card", speed: 16 }, "back to auto");
+  });
+
+  test("editor: turning the tile on and off writes and drops collapsible", hasEditor, async () => {
+    clearStage();
+    const { form, saved } = await hostedEditor({ type: "custom:openneato-replay-card", entity: VACUUM });
+    edit(form, { collapsible: true });
+    expectEqual(last(saved).collapsible, true, "on");
+    edit(form, { collapsible: false });
+    expect(!("collapsible" in last(saved)), "collapsible stays in the YAML when off");
+    expectEqual(last(saved).entity, VACUUM, "the robot");
+  });
+
+  test("editor: an edited configuration works in the card", hasEditor, async () => {
+    clearStage();
+    forgetOpenState();
+    const { form, saved } = await hostedEditor({ type: "custom:openneato-replay-card" });
+    edit(form, { collapsible: true, entity: VACUUM, state_content: ["state", "fan_speed"] });
+    const el = mount(last(saved));
+    await tileReady(el);
+    await until(() => deepText(tileOf(el).shadowRoot).includes("normal") || deepText(tileOf(el).shadowRoot).includes("Normal"),
+      "the fan speed on the tile");
+  });
+
   /* ── run ─────────────────────────────────────────────────────────────── */
 
   window.openneatoUiTests = async () => {
@@ -351,6 +446,10 @@
       await tileReady(opened);
       await readyPicker(opened);
       await until(() => deepText(opened.shadowRoot).includes("Duration"), "the session to load");
+    }
+    if (hasEditor()) {
+      const { form } = await hostedEditor({ type: "custom:openneato-replay-card", collapsible: true, entity: VACUUM });
+      await until(() => deepText(form.shadowRoot).includes("Tile that opens the replay"), "the editor's labels");
     }
     await sleep(800);
     const r = stage().getBoundingClientRect();
