@@ -9,7 +9,7 @@
  */
 (() => {
   const VACUUM = "vacuum.test_robot";
-  const CARD = "openneato-replay-card";
+  const CARD = "openneato-card";
   const hass = () => document.querySelector("home-assistant").hass;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const source = () => window.openneatoCardSource || "";
@@ -70,7 +70,7 @@
   }
   const clearStage = () => stage().replaceChildren();
   const forgetOpenState = () => {
-    for (const key of Object.keys(localStorage)) if (key.startsWith("openneato-replay-card")) localStorage.removeItem(key);
+    for (const key of Object.keys(localStorage)) if (key.startsWith("openneato-card")) localStorage.removeItem(key);
   };
 
   function deepText(root, depth = 12) {
@@ -206,7 +206,7 @@
 
   test("stats: with the picker hidden, an unset clock still says Date unknown", hasDateLabel, async () => {
     clearStage();
-    const el = mountReplay({ show_picker: false });
+    const el = mountReplay({ header: { selector: false } });
     await readyPicker(el);
     await el._selectSession("4020.jsonl");
     await until(() => statsText(el).includes("Date unknown"), "the stats row");
@@ -215,7 +215,7 @@
 
   test("stats: with the picker hidden, the map shows the latest run, and says which", hasReplay, async () => {
     clearStage();
-    const el = mountReplay({ show_picker: false });
+    const el = mountReplay({ header: { selector: false } });
     await readyPicker(el);
     const newest = Number(picker(el).options[0].value.split(".")[0]);
     await until(() => statsText(el).includes(dateOf(newest)), "the newest run's date");
@@ -232,19 +232,19 @@
     };
     const all = await shown({});
     for (const word of ["Distance", "Duration", "Battery"]) expect(all.includes(word), `${word} missing by default: ${all}`);
-    for (const [option, word] of [["show_distance", "Distance"], ["show_duration", "Duration"], ["show_battery", "Battery"]]) {
-      const text = await shown({ [option]: false });
+    for (const [option, word] of [["distance", "Distance"], ["duration", "Duration"], ["battery", "Battery"]]) {
+      const text = await shown({ header: { [option]: false } });
       expect(!text.includes(word), `${option}: false still shows ${word}: ${text}`);
       for (const other of ["Distance", "Duration", "Battery"].filter((w) => w !== word)) {
         expect(text.includes(other), `${option}: false also hid ${other}: ${text}`);
       }
     }
-    const none = await shown({ show_distance: false, show_duration: false, show_battery: false });
+    const none = await shown({ header: { distance: false, duration: false, battery: false } });
     expectEqual(none, "", "the stats row with all three off");
   });
 
   test("speed: the button on the map remembers its choice for the next time", hasReplay, async () => {
-    localStorage.removeItem("openneato-replay-card:speed");
+    localStorage.removeItem("openneato-card:speed");
     clearStage();
     const first = mountReplay();
     const button = first.shadowRoot.querySelector(".speed");
@@ -260,7 +260,7 @@
     await until(() => second._session && !second.shadowRoot.querySelector(".speed").disabled, "the second map to load");
     for (let i = 0; i < 5; i++) await press(second.shadowRoot.querySelector(".speed"));
     expectEqual(second.shadowRoot.querySelector(".speed").textContent.trim(), "1×", "after wrapping round");
-    localStorage.removeItem("openneato-replay-card:speed");
+    localStorage.removeItem("openneato-card:speed");
   });
 
   /* ── the card: a tile card, and its features ─────────────────────────── */
@@ -427,6 +427,7 @@
   test("card picker: a preview of a representative card, and no description", hasFeaturesList, async () => {
     const entry = window.customCards.find((c) => c.type === CARD);
     expectEqual(entry, { type: CARD, name: "OpenNeato", preview: true }, "the card picker entry");
+    expectEqual(document.createElement(CARD).getGridOptions(), { columns: "full", rows: "auto", min_columns: 6 }, "full width by default");
     expectEqual(customElements.get(CARD).getStubConfig(hass()), {
       type: `custom:${CARD}`, entity: VACUUM,
       features: [REPLAY, { type: "custom:openneato-controls", items: ["start", "pause", "dock"] }],
@@ -606,31 +607,58 @@
     expectEqual([name("battery"), name("charging"), name("wifi_signal")], ["Battery level", "Charging", "WiFi signal"], "the names");
   });
 
-  test("feature editor: Replay map has every option the replay card had, in the order they show", hasFeaturesList, async () => {
+  test("feature editor: Replay map lists its fields in the order they show on the card", hasFeaturesList, async () => {
     clearStage();
     const { form } = await featureEditor(REPLAY);
     expectEqual(names(form.schema), [
-      "show_picker", "show_distance", "show_duration", "show_battery", "units", "height", "fit", "rotation",
-      "floorplan", "floorplan_opacity", "grid_lines", "tiled_plan", "tiled_coverage", "trail", "autoplay",
+      "selector", "distance", "duration", "battery", "autoplay", "units", "height", "fit", "straighten", "degrees",
+      "floorplan", "floorplan_tiled", "floorplan_opacity", "grid", "trail", "coverage_tiled",
     ], "the fields");
-    expectEqual([form.data.grid_lines, form.data.tiled_plan, form.data.tiled_coverage], [true, true, true], "the grid parts");
-    expect(form.computeHelper(form.schema[0]).includes("latest run"), "no note on what the map shows without the picker");
+    const label = (name) => form.computeLabel(flat(form.schema).find((i) => i.name === name));
+    expectEqual([label("selector"), label("straighten"), label("degrees"), label("grid"), label("coverage_tiled")],
+      ["Session selector", "Straighten against the walls", "Rotation", "Background grid", "Tiled coverage and trail"], "the labels");
+    expect(form.computeHelper(form.schema[0]).includes("latest run"), "no note on what the map shows without the selector");
     expectEqual(flat(form.schema).find((i) => i.name === "units").selector.select.options.map((o) => o.label),
       ["Auto", "Metric", "US customary"], "the units");
-    expectEqual(form.data.rotation, "auto", "the rotation");
-    expectEqual(form.data.floorplan, true, "the floorplan");
+    expectEqual([form.data.straighten, form.data.degrees, form.data.floorplan, form.data.floorplan_tiled, form.data.grid],
+      [true, 0, true, true, true], "the defaults");
   });
 
-  test("feature editor: Replay map saves only what differs from the defaults", hasFeaturesList, async () => {
+  test("feature editor: Replay map saves related options nested, and only what differs from the defaults", hasFeaturesList, async () => {
     clearStage();
     const { form, saved } = await featureEditor(REPLAY);
-    editFeature(form, { units: "imperial", rotation: "90", floorplan: false });
-    expectEqual(last(saved), { ...REPLAY, units: "imperial", rotation: 90, floorplan: false }, "the changes");
-    editFeature(form, { rotation: "auto", floorplan: true });
-    expectEqual(last(saved), { ...REPLAY, units: "imperial" }, "back to the defaults");
-    editFeature(form, { tiled_plan: false });
-    expectEqual(last(saved), { ...REPLAY, units: "imperial", tiled_plan: false }, "one grid part on its own");
-    expectEqual(form.data.grid_lines, true, "the other parts are left as they were");
+    editFeature(form, { units: "imperial", degrees: 90, floorplan_tiled: false, selector: false });
+    expectEqual(last(saved), {
+      ...REPLAY, units: "imperial", header: { selector: false }, rotation: { degrees: 90 }, floorplan: { tiled: false },
+    }, "the changes");
+    editFeature(form, { degrees: 0, floorplan_tiled: true, selector: true });
+    expectEqual(last(saved), { ...REPLAY, units: "imperial" }, "back to the defaults, groups removed");
+    editFeature(form, { straighten: false, degrees: 180.5, grid: false, trail: false });
+    expectEqual(last(saved), {
+      ...REPLAY, units: "imperial", rotation: { straighten: false, degrees: 180.5 }, grid: false, coverage: { trail: false },
+    }, "a fixed angle, no grid, no trail");
+    expectEqual(flat(form.schema).find((i) => i.name === "degrees").helper, "The map's angle.", "the rotation's helper without straightening");
+  });
+
+  test("feature editor: Tiled floorplan and Floorplan opacity show only with the floorplan", hasFeaturesList, async () => {
+    clearStage();
+    const { form, saved } = await featureEditor(REPLAY);
+    editFeature(form, { floorplan: false });
+    expectEqual(last(saved), { ...REPLAY, floorplan: { show: false } }, "the floorplan off");
+    await until(() => !names(form.schema).includes("floorplan_tiled"), "the floorplan's fields to go");
+    expect(!names(form.schema).includes("floorplan_opacity"), "Floorplan opacity is still shown");
+  });
+
+  test("rotation: straightened against the walls plus the degrees, or the degrees alone", hasFeaturesList, async () => {
+    clearStage();
+    const straight = mountReplay({ rotation: { degrees: 90 } });
+    straight._floorplan = { viewRotation: 12 };
+    expectEqual(straight._baseRotationDeg(), 102, "straightened, plus 90");
+    const fixed = mountReplay({ rotation: { straighten: false, degrees: 90 } });
+    fixed._floorplan = { viewRotation: 12 };
+    expectEqual(fixed._baseRotationDeg(), 90, "the degrees alone");
+    fixed._updateAutoQuarter(400, 200, { minX: 0, maxX: 1, minY: 0, maxY: 10 });
+    expectEqual(fixed._autoQuarter, 0, "no quarter turn without straightening");
   });
 
   test("feature editor: Controls is a sortable list, without the suction", hasFeaturesList, async () => {
