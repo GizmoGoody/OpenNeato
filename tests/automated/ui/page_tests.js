@@ -258,15 +258,13 @@
     forgetOpenState();
     const el = mountCard({ entity: VACUUM });
     await tileReady(el);
-    try {
-      await until(() => tileText(el).includes("Charging") && tileText(el).includes("85"), "the sensors on the tile");
-    } catch (err) {
-      throw new Error(`${err.message}; the tile says: ${tileText(el).replace(/\s+/g, " ").slice(0, 300)}; state_content=${JSON.stringify(tileOf(el)._config?.state_content)}`);
-    }
+    // The test frontend has no backend translations, so a binary sensor reads "on", not "Charging"
+    await until(() => /Charging|on/.test(tileText(el)) && tileText(el).includes("85"), "the sensors on the tile");
     const text = tileText(el);
     expect(/docked/i.test(text), `the state is missing: ${text}`);
     expect(!text.includes("ST_C_Standby") && !text.includes("UIMGR"), `a raw state is shown: ${text}`);
     expect(!text.includes("-55"), `the Wi-Fi signal is shown without being asked for: ${text}`);
+    expect(text.indexOf("85") > text.search(/Charging|on/), `the order is not State, Charging, Battery level: ${text}`);
   });
 
   test("card: State content can show any sensor of the robot", hasCard, async () => {
@@ -275,7 +273,7 @@
     const el = mountCard({ entity: VACUUM, state_content: ["state", "wifi_signal", "uptime"] });
     await tileReady(el);
     await until(() => tileText(el).includes("-55") && tileText(el).includes("29"), "the chosen sensors");
-    expect(!tileText(el).includes("Charging"), "a sensor that was not chosen is shown");
+    expect(!/Charging|on/.test(tileText(el).replace("Test Robot", "")), "a sensor that was not chosen is shown");
   });
 
   test("card: the robot's sensors reach the tile as attributes, without the raw states, and are reused", hasCard, async () => {
@@ -397,8 +395,17 @@
     const el = mountCard({ entity: VACUUM, expanded: true, controls: ["start", "fan_speed"] });
     const controls = await until(() => controlsIn(el), "the controls");
     await until(() => keyed(controls, "start"), "the Start button");
-    await press(keyed(controls, "start"));
-    await until(() => /cleaning/i.test(tileText(el)), "the robot to start");
+    const start = keyed(controls, "start");
+    await press(start);
+    try {
+      await until(() => hass().states[VACUUM].state === "cleaning", "the robot to start");
+    } catch (err) {
+      const r = start.getBoundingClientRect();
+      throw new Error(`${err.message}; button ${Math.round(r.width)}x${Math.round(r.height)} at ${Math.round(r.left)},${Math.round(r.top)}; `
+        + `host _hass=${!!controls._hass}, entity=${controls._entityId}, state=${hass().states[VACUUM].state}, `
+        + `top element there: ${document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.tagName}`);
+    }
+    await until(() => /cleaning/i.test(tileText(el)), "the tile to show it");
     await press(keyed(controls, "fan_intense"));
     await until(() => keyed(controls, "fan_intense").getAttribute("aria-pressed") === "true", "the suction to change");
     expectEqual(keyed(controls, "fan_normal").getAttribute("aria-pressed"), "false", "the old suction");
