@@ -2533,15 +2533,21 @@ class OpenNeatoReplayCard extends HTMLElement {
     }
 }
 
-customElements.define("openneato-replay-card", OpenNeatoReplayCard);
+// A second load (for example a stale page script next to the dashboard resource)
+// must not throw, which would stop the card from showing at all.
+if (!customElements.get("openneato-replay-card")) {
+    customElements.define("openneato-replay-card", OpenNeatoReplayCard);
+}
 
 window.customCards = window.customCards || [];
-window.customCards.push({
-    type: "openneato-replay-card",
-    name: "OpenNeato Replay",
-    description: "Smooth canvas replay of a cleaning session, with scrubber and playback controls.",
-    preview: false,
-});
+if (!window.customCards.some((card) => card.type === "openneato-replay-card")) {
+    window.customCards.push({
+        type: "openneato-replay-card",
+        name: "OpenNeato Replay",
+        description: "Smooth canvas replay of a cleaning session, with scrubber and playback controls.",
+        preview: false,
+    });
+}
 
 console.info(
     `%c OPENNEATO-REPLAY-CARD %c ${CARD_VERSION} `,

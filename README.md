@@ -148,9 +148,9 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
 ### Notes for setup
 
 - **Installing the map card** — nothing to install: the integration serves the card itself and
-  registers it with the frontend on startup (so the card and its WebSocket API can never fall out of
-  version sync). Just add a manual card with `type: custom:openneato-replay-card` to any dashboard.
-  If auto-registration ever fails (see the log), add `/openneato_static/openneato-replay-card.js` as a
+  adds it to the dashboard resources on startup, even while the robot is offline (so the card and its
+  WebSocket API can never fall out of version sync). Just add a manual card with `type: custom:openneato-replay-card` to any dashboard.
+  If the dashboards are in YAML mode, the card is loaded on every page instead. If registration ever fails (see the log), add `/openneato_static/openneato-replay-card.js` as a
   JavaScript-module resource manually. The walls come from the integration's own LIDAR mapper, which
   accumulates an occupancy grid across cleanings — the plan sharpens with each run.
 - **Card options** — all optional; `type: custom:openneato-replay-card` alone gives the defaults.

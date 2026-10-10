@@ -1,6 +1,7 @@
 {
   "domain": "openneato",
   "name": "OpenNeato",
+  "after_dependencies": ["lovelace"],
   "codeowners": [
     "@Leicas"
   ],
