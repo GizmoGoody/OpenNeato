@@ -4,8 +4,11 @@ name: Validate
 # default branch, so it can be started for any branch:
 #   gh workflow run validate.yml -f branch=<branch>
 #   gh run watch
-# The code under test comes from that branch. The jobs mirror the upstream
-# ci.yml, which only runs on pushes to main and on pull requests.
+# The code under test comes from that branch; the tests and pytest.ini come
+# from ci. Each test module is skipped when the branch lacks the feature it
+# tests, so any branch can run the whole suite. The firmware, frontend and
+# flash tool jobs mirror the upstream ci.yml, which only runs on pushes to
+# main and on pull requests.
 
 on:
   workflow_dispatch:
@@ -46,6 +49,27 @@ jobs:
           # repository settings, not code
           ignore: brands topics issues
           comment: false
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.branch || github.ref_name }}
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: ci-tools
+      - name: Add the tests from ci
+        run: cp -r ci-tools/tests ci-tools/pytest.ini . && rm -rf ci-tools
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Install test dependencies
+        run: pip install pytest-homeassistant-custom-component
+      - name: Run tests
+        run: pytest -q -rs
 
   firmware-matrix:
     name: Resolve firmware matrix
