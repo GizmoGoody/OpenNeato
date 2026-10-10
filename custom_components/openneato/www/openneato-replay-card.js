@@ -48,7 +48,7 @@ const MAX_FRAME_DT = 1 / 15;
 // Playback rates offered by the speed button, in session-seconds per real
 // second. 1 is true real time; a full house clean runs close to an hour, so
 // the useful range goes well past it.
-const SPEED_STEPS = [1, 2, 4, 8, 16, 32, 64];
+const SPEED_STEPS = [1, 2, 4, 8, 16, 32, 64, 128, 256];
 const SPEED_STORAGE_KEY = "openneato-replay-card:speed";
 // World grid the viewport snaps to. One metre swallows the usual half-metre
 // of drift in where a cleaning run ends up reaching, without wasting much of
