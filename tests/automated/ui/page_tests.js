@@ -368,10 +368,18 @@
     clearStage();
     const { form } = await hostedEditor({ type: "custom:openneato-replay-card", entity: VACUUM });
     await until(() => deepText(form.shadowRoot).includes("Tile that opens the replay"), "the form");
-    const rows = [...form.shadowRoot.querySelectorAll("*")].map((el) => `${el.tagName.toLowerCase()} ${Math.round(el.getBoundingClientRect().height)}`);
-    const picker = findDeep(form.shadowRoot, "ha-selector-entity, ha-entity-picker, ha-entity-combo-box");
-    expect(picker, `no robot picker in the form: ${rows.join(", ")}`);
-    expect(picker.getBoundingClientRect().height > 20, `the robot picker has no height: ${rows.join(", ")}`);
+    const selector = form.shadowRoot.querySelector("ha-selector");
+    const describe = () => {
+      const inner = selector.shadowRoot?.firstElementChild;
+      return `ha-selector ${Math.round(selector.getBoundingClientRect().height)}px, selector=${JSON.stringify(selector.selector)}, `
+        + `inner=${inner?.tagName?.toLowerCase()} ${Math.round(inner?.getBoundingClientRect().height ?? -1)}px, `
+        + `inner shadow=${inner?.shadowRoot?.innerHTML?.length ?? "none"} chars, value=${JSON.stringify(selector.value)}`;
+    };
+    try {
+      await until(() => selector.getBoundingClientRect().height > 20, "the robot picker to show");
+    } catch (err) {
+      throw new Error(`${err.message}: ${describe()}`);
+    }
   });
 
   test("editor: start state and state content appear only with the tile", hasEditor, async () => {
