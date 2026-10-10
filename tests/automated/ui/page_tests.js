@@ -287,13 +287,21 @@
     expect(!/Charging|(^|[^A-Za-z])on([^A-Za-z]|$)/.test(tileText(el).replace("Test Robot", "")), "a sensor that was not chosen is shown");
   });
 
+  test("card: the old battery_level name still works in State content", hasCard, async () => {
+    clearStage();
+    forgetOpenState();
+    const el = mountCard({ entity: VACUUM, state_content: ["state", "battery_level"] });
+    await tileReady(el);
+    await until(() => tileText(el).includes("85"), "the battery on the tile");
+  });
+
   test("card: the robot's sensors reach the tile as attributes, without the raw states, and are reused", hasCard, async () => {
     clearStage();
     const el = mountCard({ entity: VACUUM });
     await tileReady(el);
     const first = el._tileHass().states[VACUUM];
     const names = Object.keys(first.attributes);
-    for (const wanted of ["battery_level", "charging", "wifi_signal", "uptime", "fan_speed"]) expect(names.includes(wanted), `no ${wanted}: ${names}`);
+    for (const wanted of ["battery", "charging", "wifi_signal", "uptime", "fan_speed"]) expect(names.includes(wanted), `no ${wanted}: ${names}`);
     for (const unwanted of ["robot_state", "ui_state"]) expect(!names.includes(unwanted), `${unwanted} is offered`);
     expect(el._tileHass().states[VACUUM] === first, "the state was made again with nothing changed, so the tile would redraw");
   });
@@ -536,9 +544,13 @@
     clearStage();
     const { form } = await hostedEditor(cardConfig);
     const names = Object.keys(form.hass.states[VACUUM].attributes);
-    for (const wanted of ["battery_level", "charging", "wifi_signal"]) expect(names.includes(wanted), `no ${wanted} to pick: ${names}`);
+    for (const wanted of ["battery", "charging", "wifi_signal"]) expect(names.includes(wanted), `no ${wanted} to pick: ${names}`);
+    // HA hides an attribute called battery_level from the picker, so it must not be what the card offers
+    expect(!names.includes("battery_level"), "battery_level is offered, and Home Assistant hides it");
+    const name = (attribute) => form.hass.formatEntityAttributeName(form.hass.states[VACUUM], attribute);
+    expectEqual([name("battery"), name("charging"), name("wifi_signal")], ["Battery level", "Charging", "WiFi signal"], "the sensors are named as the device names them");
     for (const unwanted of ["robot_state", "ui_state"]) expect(!names.includes(unwanted), `${unwanted} is offered`);
-    expectEqual(form.data.state_content, ["state", "charging", "battery_level"], "the default State content");
+    expectEqual(form.data.state_content, ["state", "charging", "battery"], "the default State content");
   });
 
   test("editor: the defaults are filled in, and a value set back to its default is dropped", hasEditor, async () => {
