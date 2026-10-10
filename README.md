@@ -179,8 +179,6 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
         - navigation_mode
   ```
 
-<<<<<<< HEAD
-=======
   | Option | Default | What it does |
   |---|---|---|
   | `expanded` | `false` | Show the features when the page loads, until the person has chosen in this browser. |
@@ -223,7 +221,6 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
 
   A replay-only card from before (its options at the top level, with no `features` list) still works, and
   the card editor turns those options into a Replay map feature. `title` and `speed` are no longer used.
->>>>>>> feature/openneato-card
 - **Reading the diagnostics** — two field names are misleading and the integration corrects for them:
   `errorCode` returns **200** (`UI_ALERT_INVALID`) when nothing is wrong, so the *Error code* sensor
   reports *unknown* instead; and `chargerMAH` / `dischargeMAH` are **milliamps, not milliamp-hours**
