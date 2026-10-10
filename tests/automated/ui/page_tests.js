@@ -591,7 +591,7 @@
     own.dispatchEvent(new CustomEvent("value-changed", { detail: { value: { expanded: true } } }));
     expectEqual(last(saved), { ...cardConfig, expanded: true }, "on");
     own.dispatchEvent(new CustomEvent("value-changed", { detail: { value: { expanded: false } } }));
-    expectEqual(last(saved), cardConfig, "off");
+    expectEqual(last(saved), { ...cardConfig, expanded: false }, "off, and kept");
   });
 
   test("card editor: a change in the tile card's editor keeps Expanded on load", hasFeaturesList, async () => {
@@ -640,7 +640,7 @@
       [true, 0, true, true, true], "the defaults");
   });
 
-  test("feature editor: Replay map saves related options nested, and only what differs from the defaults", hasFeaturesList, async () => {
+  test("feature editor: Replay map saves what is set, nested, default or not, and nothing else", hasFeaturesList, async () => {
     clearStage();
     const { form, saved } = await featureEditor(REPLAY);
     editFeature(form, { units: "us_customary", degrees: 90, floorplan_tiled: false, selector: false });
@@ -648,10 +648,13 @@
       ...REPLAY, units: "us_customary", header: { selector: false }, rotation: { degrees: 90 }, floorplan: { tiled: false },
     }, "the changes");
     editFeature(form, { degrees: 0, floorplan_tiled: true, selector: true });
-    expectEqual(last(saved), { ...REPLAY, units: "us_customary" }, "back to the defaults, groups removed");
+    expectEqual(last(saved), {
+      ...REPLAY, units: "us_customary", header: { selector: true }, rotation: { degrees: 0 }, floorplan: { tiled: true },
+    }, "set back to the defaults, and kept");
     editFeature(form, { straighten: false, degrees: 180.5, grid: false, trail: false });
     expectEqual(last(saved), {
-      ...REPLAY, units: "us_customary", rotation: { straighten: false, degrees: 180.5 }, grid: false, coverage: { trail: false },
+      ...REPLAY, units: "us_customary", header: { selector: true }, rotation: { straighten: false, degrees: 180.5 },
+      floorplan: { tiled: true }, grid: false, coverage: { trail: false },
     }, "a fixed angle, no grid, no trail");
     expectEqual(flat(form.schema).find((i) => i.name === "degrees").helper, "The map's angle.", "the rotation's helper without straightening");
   });
