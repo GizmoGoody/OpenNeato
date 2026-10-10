@@ -156,3 +156,17 @@ async def test_no_live_fit_before_enough_scans(hass: HomeAssistant) -> None:
     runner._session_name = NAME
     runner._captures = [(0.0, 0.0, 0.0, [], 5.0)] * (lidar_runner.LIVE_ALIGN_MIN_CAPTURES - 1)
     assert await runner.async_live_alignment(NAME) is None
+
+
+async def test_finished_run_keeps_its_live_fit_until_merged(hass: HomeAssistant) -> None:
+    """Between the end of a clean and its merge, the run keeps its live fit."""
+    runner = lidar_runner.LidarMapRunner(hass, "entry", None, SimpleNamespace(async_add_listener=lambda *_: None))
+    runner._map = lidar_mapper.AccumulatedMap({})
+    runner._map.walls = dict(ROOM)
+    runner._collecting = True
+    runner._session_name = NAME
+    runner._live_align = (1, -6, -3)
+    # Too few captures to merge: the run ends unmerged, as it is in the gap before a merge
+    runner._captures = []
+    await runner._finish()
+    assert runner.alignment(NAME) == (1, -6, -3)
