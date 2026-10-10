@@ -2904,24 +2904,42 @@ const OWN_KEYS = ["expanded"];
 const LEGACY_REPLAY_KEYS = [
     "session", "entry_id", "rotation", "floorplan", "floorplan_opacity", "grid", "grid_lines", "tiled_plan",
     "tiled_coverage", "trail", "fit", "units", "height", "speed", "autoplay", "show_picker", "show_distance",
-    "show_duration", "show_battery", "show_stats", "title",
+    "show_duration", "show_battery", "show_stats", "title", "collapsible",
 ];
 const TOGGLE_ACTION = { action: "fire-dom-event", openneato_replay_card: "toggle" };
 
-// The card as the editor writes it: an older replay-only card's options become
-// a Replay map feature, so every feature is in the tile card's features list.
+// The card as the editor writes it, with every feature in the tile card's
+// features list. Earlier versions of the card kept options at the top that the
+// tile card does not know (and its editor refuses): the replay-only card's map
+// options, and the first OpenNeato card's controls, configuration and
+// collapsible. They become features here, so older cards keep working.
+const DROPPED_KEYS = ["title", "speed", "collapsible"];
 function explicit(config) {
-    if (Array.isArray(config.features)) return config;
-    const replay = { type: `custom:${REPLAY_TYPE}` };
     const next = { ...config };
-    for (const key of LEGACY_REPLAY_KEYS) {
-        if (key in next) {
-            if (key !== "title" && key !== "speed") replay[key] = next[key];
-            delete next[key];
+    const features = Array.isArray(next.features) ? next.features.map((f) => ({ ...f })) : [];
+    let replay = features.find((f) => f.type === `custom:${REPLAY_TYPE}`);
+    const legacy = LEGACY_REPLAY_KEYS.filter((key) => key in next);
+    if (!Array.isArray(next.features) || legacy.some((key) => !DROPPED_KEYS.includes(key))) {
+        if (!replay) {
+            replay = { type: `custom:${REPLAY_TYPE}` };
+            features.unshift(replay);
         }
     }
-    next.features = [replay];
-    return next;
+    for (const key of legacy) {
+        if (!DROPPED_KEYS.includes(key) && !(key in replay)) replay[key] = next[key];
+        delete next[key];
+    }
+    if (Array.isArray(next.controls)) {
+        const items = next.controls.filter((key) => key !== "fan_speed");
+        if (items.length) features.push({ type: `custom:${CONTROLS_TYPE}`, items });
+        if (next.controls.includes("fan_speed")) features.push({ type: `custom:${SUCTION_TYPE}` });
+    }
+    if (Array.isArray(next.configuration) && next.configuration.length) {
+        features.push({ type: `custom:${CONFIGURATION_TYPE}`, items: next.configuration });
+    }
+    for (const key of ["controls", "configuration", ...DROPPED_KEYS]) delete next[key];
+    next.features = features;
+    return JSON.stringify(next) === JSON.stringify(config) ? config : next;
 }
 
 // The tile card's own configuration. A tap on the tile shows or hides the
@@ -3315,6 +3333,8 @@ class OpenNeatoCardEditor extends HTMLElement {
         this.shadowRoot.innerHTML = `
             <style>
                 #tile { display: block; }
+                [hidden] { display: none !important; }
+                ha-alert { display: block; margin-bottom: 24px; }
                 ha-expansion-panel {
                     display: block; margin-top: 24px;
                     --expansion-panel-content-padding: 0;
@@ -3324,12 +3344,14 @@ class OpenNeatoCardEditor extends HTMLElement {
                 ha-expansion-panel > [slot="header"] { margin: 0; font-size: inherit; font-weight: inherit; }
                 .content { padding: 12px; }
             </style>
+            <ha-alert alert-type="error" hidden></ha-alert>
             <div id="tile"></div>
             <ha-expansion-panel outlined expanded>
                 <div slot="header" role="heading" aria-level="3">OpenNeato</div>
                 <div class="content"><ha-form id="form"></ha-form></div>
             </ha-expansion-panel>`;
         this._form = this.shadowRoot.getElementById("form");
+        this._error = this.shadowRoot.querySelector("ha-alert");
         this._form.computeLabel = (s) => s.label ?? s.name;
         this._form.computeHelper = (s) => s.helper;
         this._form.schema = [toggle("expanded", "Expanded on load")];
@@ -3398,7 +3420,18 @@ class OpenNeatoCardEditor extends HTMLElement {
             })();
             await this._loading;
         }
-        this._tileEditor.setConfig(tileEditorConfig(this._config));
+        // The tile card's editor refuses an option it does not know. Say so, in
+        // Home Assistant's words, rather than leave the editor empty.
+        try {
+            this._tileEditor.setConfig(tileEditorConfig(this._config));
+            this._error.hidden = true;
+            this._tileEditor.hidden = false;
+        } catch (err) {
+            console.error("openneato-card: the tile card's editor refused this card", err);
+            this._error.textContent = `${err?.message ?? err}. Edit this card in the code editor.`;
+            this._error.hidden = false;
+            this._tileEditor.hidden = true;
+        }
     }
 
     _render() {
