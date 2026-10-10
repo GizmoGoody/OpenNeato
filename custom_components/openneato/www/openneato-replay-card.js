@@ -527,6 +527,9 @@ class OpenNeatoReplay extends HTMLElement {
                     display: flex;
                     flex-wrap: nowrap;
                     gap: 16px;
+                    /* The same 16px at the ends as between the figures, so the
+                       space around each is even */
+                    padding-inline: 16px;
                     font-size: 0.8rem;
                     color: var(--secondary-text-color);
                     flex: 1 1 auto;
