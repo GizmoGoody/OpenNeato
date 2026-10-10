@@ -694,6 +694,21 @@ class OpenNeatoReplay extends HTMLElement {
                 .livebox button.live {
                     background: var(--card-background-color);
                 }
+                .livebox {
+                    gap: 6px;
+                    align-items: center;
+                }
+                /* Shown while a live clean is drawn with the last clean's
+                   alignment, until its own fit is ready */
+                .aligning {
+                    border-radius: 10px;
+                    padding: 3px 8px;
+                    font-size: 0.75rem;
+                    line-height: 1.4;
+                    white-space: nowrap;
+                    color: #fff;
+                    background: color-mix(in srgb, var(--info-color, #039be5) 75%, #000);
+                }
                 button.live.on {
                     background: var(--live);
                     color: #fff;
@@ -770,7 +785,7 @@ class OpenNeatoReplay extends HTMLElement {
                 <div class="stage">
                     <canvas></canvas>
                     <div class="overlay">Loading…</div>
-                    <div class="livebox"><button class="live" hidden></button></div>
+                    <div class="livebox"><span class="aligning" hidden>Aligning</span><button class="live" hidden></button></div>
                 </div>
                 <div class="controls">
                     <button class="play" title="Play/Pause" disabled>
@@ -802,6 +817,7 @@ class OpenNeatoReplay extends HTMLElement {
         this._totalEl = root.querySelector(".total");
         this._scrub = root.querySelector(".scrub");
         this._liveBtn = root.querySelector(".live");
+        this._aligningEl = root.querySelector(".aligning");
         root.querySelector(".livebox").classList.add(this._config.live_position);
 
         this._stage.style.height = `${Number(this._config.height) || DEFAULTS.height}px`;
@@ -1044,9 +1060,12 @@ class OpenNeatoReplay extends HTMLElement {
         let wanted;
         if (liveName && !this._userPicked) {
             wanted = liveName;
-        } else if (listed(this._selectedName)) {
+        } else if (this._userPicked && listed(this._selectedName)) {
             wanted = this._selectedName;
         } else {
+            // The newest clean, unless one was picked by hand. A clean's file is
+            // renamed when it ends (compressed), so the one being followed can
+            // drop out of the list for a moment; the newest is still the one to show.
             wanted = this._sessions[0].name;
         }
 
@@ -1258,6 +1277,8 @@ class OpenNeatoReplay extends HTMLElement {
         // The session payload says whether it is still recording when the
         // backend is new enough; otherwise the list's flag stands.
         if (typeof raw.recording === "boolean" && !this._finalDue) this._setLive(raw.recording);
+        // Still drawn with the last clean's alignment (or none, where there is a map to fit)
+        this._aligning = raw.alignment_source === "previous" || (raw.alignment_source === "none" && Boolean(raw.floorplan));
         // Layers rebuild from the new arrays on the next frame. The view
         // transform is left alone, so pan and zoom survive a refresh.
         this._cov.sig = "";
@@ -1431,6 +1452,7 @@ class OpenNeatoReplay extends HTMLElement {
         if (!chip) return;
         const show = this._live && Boolean(this._session);
         chip.hidden = !show;
+        if (this._aligningEl) this._aligningEl.hidden = !(show && this._aligning);
         if (!show) {
             this._chipKey = null;
             return;
