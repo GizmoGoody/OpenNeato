@@ -102,8 +102,7 @@ jobs:
           from pathlib import Path
           import homeassistant.components
           manifest = Path(homeassistant.components.__file__).parent / "frontend" / "manifest.json"
-          print("
-".join(json.loads(manifest.read_text()).get("requirements", [])))
+          print(*json.loads(manifest.read_text()).get("requirements", []), sep=chr(10))
           EOF
           cat frontend-requirements.txt
           pip install -r frontend-requirements.txt
