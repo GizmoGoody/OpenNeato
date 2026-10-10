@@ -260,7 +260,7 @@
     await until(() => labelled._session && statsText(labelled).includes("Duration"), "the names to show");
   });
 
-  test("map: the live badge sits on the map, in the corner chosen", hasFeaturesList, async () => {
+  test("map: the live badge sits on the map, in the corner chosen", () => hasFeaturesList(), async () => {
     clearStage();
     const standard = mountReplay();
     const badge = standard.shadowRoot.querySelector(".stage > button.live");
@@ -271,7 +271,7 @@
     expect(top.shadowRoot.querySelector(".stage > button.live").classList.contains("top_left"), "not where it was put");
   });
 
-  test("map: on a narrow card the controls row stays inside the card", hasFeaturesList, async () => {
+  test("map: on a narrow card the controls row stays inside the card", () => hasFeaturesList(), async () => {
     clearStage();
     const box = document.createElement("div");
     box.style.width = "280px";
