@@ -56,7 +56,7 @@
       el.id = "openneato-stage";
       Object.assign(el.style, {
         position: "absolute", left: "0", top: "0", width: "560px", padding: "16px", zIndex: "10000",
-        display: "grid", gap: "16px", boxSizing: "border-box",
+        display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: "16px", boxSizing: "border-box",
         background: "var(--primary-background-color)", color: "var(--primary-text-color)",
       });
       document.body.append(el);
