@@ -275,7 +275,12 @@ class LidarMapRunner:
         self._collecting = False
         self._stop_timer()
         captures, self._captures = self._captures, []
-        # From here the merged alignment, if there is one, takes over
+        # The card fetches the finished run straight away, before the merge below
+        # has stored its alignment: until it does, the live fit stands for it, so
+        # the run is not drawn in the robot's raw frame in that gap. The merge
+        # replaces it with its own.
+        if self._session_name and self._live_align and self._map is not None:
+            self._map.alignments.setdefault(self._session_name, self._live_align)
         self._live_align = None
         if len(captures) < MIN_CAPTURES:
             _LOGGER.info(
