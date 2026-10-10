@@ -28,8 +28,11 @@ from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
 from homeassistant.components import websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant
+from homeassistant.core import ServiceCall
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 UI = Path(__file__).parent / "ui"
 CARD_FILE = Path("custom_components/openneato/www/openneato-replay-card.js").resolve()
@@ -131,6 +134,88 @@ async def _fake_session(
     connection.send_result(msg["id"], _session(item))
 
 
+def _set_up_robot(hass: HomeAssistant) -> None:
+    """The robot as the integration makes it: one device with a vacuum, sensors,
+    switches and a select, and services that change them."""
+    entry = MockConfigEntry(domain="openneato", data={"host": "192.0.2.1"})
+    entry.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={("openneato", "test")}, name="Test Robot"
+    )
+    registry = er.async_get(hass)
+
+    def add(domain: str, key: str, state: str, name: str, **attributes: Any) -> str:
+        entity = registry.async_get_or_create(
+            domain,
+            "openneato",
+            f"test_{key}",
+            suggested_object_id=f"test_robot_{key}" if domain != "vacuum" else "test_robot",
+            device_id=device.id,
+            translation_key=key if domain != "vacuum" else None,
+            config_entry=entry,
+        )
+        hass.states.async_set(
+            entity.entity_id, state, {"friendly_name": f"Test Robot {name}".strip(), **attributes}
+        )
+        return entity.entity_id
+
+    add(
+        "vacuum", "robot", "docked", "",
+        fan_speed="normal", fan_speed_list=["eco", "normal", "intense"],
+        # The raw states the card leaves out of State content
+        robot_state="ST_C_Standby", ui_state="UIMGR_STATE_STANDBY",
+        supported_features=14140,
+    )
+    add("sensor", "battery_level", "85", "Battery level", unit_of_measurement="%", device_class="battery")
+    add("binary_sensor", "charging", "on", "Charging", device_class="battery_charging")
+    add("sensor", "wifi_signal", "-55", "WiFi signal", unit_of_measurement="dBm", device_class="signal_strength")
+    add("sensor", "uptime", "29726", "Uptime", unit_of_measurement="s")
+    add("switch", "eco_mode", "off", "Eco mode")
+    add("switch", "stealth_led", "on", "Stealth LED")
+    add("switch", "schedule_monday_1_enabled", "off", "Schedule Monday 1 enabled")
+    add("select", "navigation_mode", "normal", "Navigation mode", options=["normal", "gentle", "deep"])
+
+    def change(entity_id: str, state: str | None = None, **attributes: Any) -> None:
+        current = hass.states.get(entity_id)
+        hass.states.async_set(
+            entity_id, state if state is not None else current.state, {**current.attributes, **attributes}
+        )
+
+    def vacuum(state: str):
+        async def handler(call: ServiceCall) -> None:
+            change(VACUUM, state)
+
+        return handler
+
+    async def set_fan_speed(call: ServiceCall) -> None:
+        change(VACUUM, fan_speed=call.data["fan_speed"])
+
+    async def switch(call: ServiceCall) -> None:
+        for entity_id in _entities(call):
+            change(entity_id, "on" if call.service == "turn_on" else "off")
+
+    async def select(call: ServiceCall) -> None:
+        for entity_id in _entities(call):
+            change(entity_id, call.data["option"])
+
+    for service, state in (("start", "cleaning"), ("pause", "paused"), ("stop", "idle"),
+                           ("return_to_base", "returning"), ("clean_spot", "cleaning"), ("locate", None)):
+        hass.services.async_register("vacuum", service, vacuum(state) if state else _ignore)
+    hass.services.async_register("vacuum", "set_fan_speed", set_fan_speed)
+    hass.services.async_register("switch", "turn_on", switch)
+    hass.services.async_register("switch", "turn_off", switch)
+    hass.services.async_register("select", "select_option", select)
+
+
+async def _ignore(call: ServiceCall) -> None:
+    """A command with nothing to show for it."""
+
+
+def _entities(call: ServiceCall) -> list[str]:
+    ids = call.data.get("entity_id") or []
+    return [ids] if isinstance(ids, str) else list(ids)
+
+
 async def test_card_ui(
     hass: HomeAssistant,
     hass_storage: dict,
@@ -157,12 +242,7 @@ async def test_card_ui(
     await hass.http.async_register_static_paths([StaticPathConfig(CARD_PATH, str(CARD_FILE), False)])
     websocket_api.async_register_command(hass, _fake_sessions)
     websocket_api.async_register_command(hass, _fake_session)
-    # Registered as an OpenNeato vacuum, as the integration would: the card finds
-    # the robot by that, and the editor's robot picker lists it
-    er.async_get(hass).async_get_or_create(
-        "vacuum", "openneato", "test_robot", suggested_object_id="test_robot"
-    )
-    hass.states.async_set(VACUUM, "docked", {"friendly_name": "Test Robot", "fan_speed": "normal", "fan_speed_list": ["eco", "normal", "intense"]})
+    _set_up_robot(hass)
     await hass.async_block_till_done()
 
     client = await hass_client()
