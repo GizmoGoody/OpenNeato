@@ -134,6 +134,8 @@
   const optionTexts = (el) => [...picker(el).options].map((o) => o.textContent);
   const readyPicker = (el) => until(() => picker(el).options.length === 3 && picker(el), "the session list");
   const statsText = (el) => el.shadowRoot.querySelector(".stats").textContent;
+  // The figures' names: in the text when they show, in the hover title when hidden
+  const statsNames = (el) => [...el.shadowRoot.querySelectorAll(".stats span")].map((s) => s.title || s.textContent).join(" ");
 
   test("picker: closed, it shows only the date of the session on screen", hasDateLabel, async () => {
     clearStage();
@@ -187,7 +189,7 @@
     picker(el).value = picker(el).options[2].value;
     picker(el).dispatchEvent(new Event("change", { bubbles: true }));
     expectEqual(optionTexts(el).slice(1), ["Date unknown", "Date unknown"], "closed again");
-    await until(() => statsText(el).includes("Duration"), "the chosen session to load");
+    await until(() => statsNames(el).includes("Duration"), "the chosen session to load");
     expectEqual(picker(el).selectedOptions[0].textContent, "Date unknown", "the chosen session");
   });
 
@@ -230,10 +232,10 @@
       await sleep(300);
       return statsText(el);
     };
-    const all = await shown({});
+    const all = await shown({ header: { hide_labels: false } });
     for (const word of ["Distance", "Duration", "Battery"]) expect(all.includes(word), `${word} missing by default: ${all}`);
     for (const [option, word] of [["distance", "Distance"], ["duration", "Duration"], ["battery", "Battery"]]) {
-      const text = await shown({ header: { [option]: false } });
+      const text = await shown({ header: { [option]: false, hide_labels: false } });
       expect(!text.includes(word), `${option}: false still shows ${word}: ${text}`);
       for (const other of ["Distance", "Duration", "Battery"].filter((w) => w !== word)) {
         expect(text.includes(other), `${option}: false also hid ${other}: ${text}`);
@@ -241,6 +243,20 @@
     }
     const none = await shown({ header: { distance: false, duration: false, battery: false } });
     expectEqual(none, "", "the stats row with all three off");
+  });
+
+  test("stats: the figures show without their names by default, the names on hover", hasReplay, async () => {
+    clearStage();
+    const el = mountReplay();
+    await until(() => el._session && statsNames(el).includes("Duration"), "the session to load");
+    const text = statsText(el);
+    for (const word of ["Distance", "Duration", "Battery"]) expect(!text.includes(word), `${word} is shown: ${text}`);
+    expect(text.includes("1:47") && text.includes("142"), `the figures are missing: ${text}`);
+    const span = el.shadowRoot.querySelector('.stats span[title="Duration"]');
+    expect(span && span.getAttribute("aria-label").startsWith("Duration "), "no name for hover and screen readers");
+    clearStage();
+    const labelled = mountReplay({ header: { hide_labels: false } });
+    await until(() => labelled._session && statsText(labelled).includes("Duration"), "the names to show");
   });
 
   test("speed: the button on the map remembers its choice for the next time", hasReplay, async () => {
@@ -349,7 +365,7 @@
     await until(() => replay.shadowRoot.querySelector(".picker")?.options.length === 3, "the session list");
     expect(openneatoCalls() > before, "no calls to the integration after opening");
     expectEqual(chevron(el).getAttribute("aria-expanded"), "true", "aria-expanded");
-    await until(() => replay.shadowRoot.querySelector(".stats").textContent.includes("Duration"), "the session to load");
+    await until(() => statsNames(replay).includes("Duration"), "the session to load");
     expect(replay.shadowRoot.querySelector("canvas").getBoundingClientRect().height > 100, "the map has no height");
     expect(visible(tileInfo(el)), "the tile went away when it opened");
   });
@@ -429,7 +445,7 @@
     expectEqual(entry, { type: CARD, name: "OpenNeato", preview: true }, "the card picker entry");
     expectEqual(document.createElement(CARD).getGridOptions(), { columns: "full", rows: "auto", min_columns: 6 }, "full width by default");
     expectEqual(customElements.get(CARD).getStubConfig(hass()), {
-      type: `custom:${CARD}`, entity: VACUUM,
+      type: `custom:${CARD}`, entity: VACUUM, state_content: ["state", "charging", "battery"],
       features: [REPLAY, { type: "custom:openneato-controls", items: ["start", "pause", "dock"] }],
     }, "the stub");
   });
@@ -611,7 +627,7 @@
     clearStage();
     const { form } = await featureEditor(REPLAY);
     expectEqual(names(form.schema), [
-      "selector", "distance", "duration", "battery", "autoplay", "units", "height", "fit", "straighten", "degrees",
+      "selector", "distance", "duration", "battery", "hide_labels", "autoplay", "units", "height", "fit", "straighten", "degrees",
       "floorplan", "floorplan_tiled", "floorplan_opacity", "grid", "trail", "coverage_tiled",
     ], "the fields");
     const label = (name) => form.computeLabel(flat(form.schema).find((i) => i.name === name));
@@ -733,7 +749,7 @@
       forgetOpenState();
       const replay = mountCard({ entity: VACUUM, expanded: true, features: [REPLAY] });
       await tileReady(replay);
-      await until(() => replayIn(replay)?.shadowRoot.querySelector(".stats").textContent.includes("Duration"), "the replay");
+      await until(() => replayIn(replay) && statsNames(replayIn(replay)).includes("Duration"), "the replay");
       const more = mountCard({
         entity: VACUUM, expanded: true, state_content: ["state", "wifi_signal", "uptime"],
         features: [
