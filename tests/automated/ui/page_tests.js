@@ -373,7 +373,9 @@
       const inner = selector.shadowRoot?.firstElementChild;
       return `ha-selector ${Math.round(selector.getBoundingClientRect().height)}px, selector=${JSON.stringify(selector.selector)}, `
         + `inner=${inner?.tagName?.toLowerCase()} ${Math.round(inner?.getBoundingClientRect().height ?? -1)}px, `
-        + `inner shadow=${inner?.shadowRoot?.innerHTML?.length ?? "none"} chars, value=${JSON.stringify(selector.value)}`;
+        + `inner shadow=${inner?.shadowRoot?.innerHTML?.slice(0, 300)}, value=${JSON.stringify(selector.value)}, `
+        + `defined: ${["ha-selector-entity", "ha-entity-picker", "ha-entity-combo-box", "ha-combo-box"].map((n) => `${n}=${!!customElements.get(n)}`).join(" ")}, `
+        + `hass.entities=${Object.keys(hass().entities ?? {}).length}`;
     };
     try {
       await until(() => selector.getBoundingClientRect().height > 20, "the robot picker to show");
