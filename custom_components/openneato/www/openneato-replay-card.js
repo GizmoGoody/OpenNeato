@@ -104,7 +104,29 @@ const DEFAULTS = {
     show_stats: true,
     height: 360,
     session: "latest",
+    // A tile card on top (the robot's name, state and icon, as any tile card
+    // shows them) that opens and closes the replay with a tap. The choice is
+    // remembered in this browser. While closed the card loads nothing from
+    // the robot and draws nothing.
+    collapsible: false,
+    // Whether the replay starts open, until the person has chosen.
+    expanded: false,
 };
+
+// The options that belong to the tile card on top; everything else is this
+// card's own. tap_action is the card's to use (it opens and closes the replay).
+const TILE_KEYS = [
+    "name", "icon", "color", "state_content", "vertical", "hide_state", "show_entity_picture",
+    "features", "features_position", "hold_action", "double_tap_action",
+    "icon_tap_action", "icon_hold_action", "icon_double_tap_action",
+];
+const TOGGLE_ACTION = { action: "fire-dom-event", openneato_replay_card: "toggle" };
+
+function tileConfig(config, entity) {
+    const tile = { type: "tile", entity, tap_action: TOGGLE_ACTION };
+    for (const key of TILE_KEYS) if (config[key] !== undefined) tile[key] = config[key];
+    return tile;
+}
 
 /* ── small helpers ──────────────────────────────────────────────────── */
 
@@ -290,6 +312,10 @@ class OpenNeatoReplayCard extends HTMLElement {
 
         this._hass = null;
         this._config = { ...DEFAULTS };
+        // Whether the replay is showing. Always, unless the card is collapsible.
+        this._collapsible = false;
+        this._open = true;
+        this._tile = null;
         this._sessions = [];
         this._session = null;
         this._selectedName = null;
@@ -366,6 +392,13 @@ class OpenNeatoReplayCard extends HTMLElement {
             tiles: this._config.tiled_coverage ?? master,
         };
         this._buildDom();
+        this._collapsible = Boolean(this._config.collapsible);
+        this._open = this._collapsible ? (this._storedOpen() ?? Boolean(this._config.expanded)) : true;
+        // The grid sizes a collapsible card to its content, as the tile card
+        // does; a card that cannot collapse keeps the grid's own default.
+        if (this._collapsible) this.getGridOptions = () => ({ columns: 12, rows: "auto" });
+        else delete this.getGridOptions;
+        this._applyLayout();
     }
 
     // Make the wrapper Home Assistant puts around this card stretch.
@@ -388,6 +421,7 @@ class OpenNeatoReplayCard extends HTMLElement {
     }
 
     getCardSize() {
+        if (this._collapsible && !this._open) return 1;
         const h = Number(this._config.height);
         return Math.ceil((Number.isFinite(h) ? h : DEFAULTS.height) / 50) + 1;
     }
@@ -403,10 +437,13 @@ class OpenNeatoReplayCard extends HTMLElement {
             this._renderPicker();
             this._renderStats();
         }
-        if (first) this._loadSessions();
+        if (this._tile) this._tile.hass = hass;
+        else if (first) this._applyLayout();
+        // A collapsed card loads nothing until it is opened (see _setOpen)
+        if (first && this._open) this._loadSessions();
         // connectedCallback starts the timer for a card in the tree; an
         // editor preview that never gets attached must not poll forever.
-        if (this.isConnected) this._ensurePoll();
+        if (this.isConnected && this._open) this._ensurePoll();
     }
 
     connectedCallback() {
@@ -415,8 +452,10 @@ class OpenNeatoReplayCard extends HTMLElement {
         if (this._config && this._config.height === "fill") this._stretchWrapper();
         if (this._canvas) this._observeResize();
         document.addEventListener("visibilitychange", this._onVisibilityBound);
-        this._ensurePoll();
-        if (this._live) this._startDurationTicker();
+        if (this._open) {
+            this._ensurePoll();
+            if (this._live) this._startDurationTicker();
+        }
         this._dirty = true;
         this._scheduleRender();
     }
@@ -446,6 +485,60 @@ class OpenNeatoReplayCard extends HTMLElement {
                    otherwise beat the hidden attribute. */
                 [hidden] {
                     display: none !important;
+                }
+                /* The tile card on top is part of this card, not a card of its own */
+                .summary {
+                    position: relative;
+                    display: flex;
+                    align-items: center;
+                }
+                .tilewrap {
+                    flex: 1 1 auto;
+                    min-width: 0;
+                }
+                hui-tile-card {
+                    display: block;
+                    --ha-card-background: transparent;
+                    --card-background-color: transparent;
+                    --ha-card-box-shadow: none;
+                    --ha-card-border-width: 0;
+                    --ha-card-border-color: transparent;
+                    --ha-card-backdrop-filter: none;
+                }
+                .plain {
+                    flex: 1 1 auto;
+                    min-width: 0;
+                    padding: 16px;
+                    font-size: 1.1rem;
+                    font-weight: 500;
+                    color: var(--primary-text-color);
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    cursor: pointer;
+                }
+                .chevron {
+                    flex: 0 0 auto;
+                    margin: 0 12px 0 0;
+                    padding: 8px;
+                }
+                .chevron svg {
+                    transition: transform 150ms ease-in-out;
+                }
+                .chevron[aria-expanded="true"] svg {
+                    transform: rotate(180deg);
+                }
+                @media (prefers-reduced-motion: reduce) {
+                    .chevron svg { transition: none; }
+                }
+                .drawer {
+                    display: flex;
+                    flex-direction: column;
+                    flex: 1 1 auto;
+                    min-height: 0;
+                }
+                ha-card.collapsible .drawer {
+                    border-top: 1px solid var(--divider-color);
                 }
                 /* One row: title (only if configured), then the session
                    picker, then the stats. The stats scroll inside their own
@@ -683,6 +776,14 @@ class OpenNeatoReplayCard extends HTMLElement {
                 }
             </style>
             <ha-card>
+                <div class="summary" hidden>
+                    <div class="tilewrap" hidden></div>
+                    <div class="plain" hidden role="button" tabindex="0"></div>
+                    <button class="chevron" type="button" aria-controls="drawer" aria-expanded="false">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
+                    </button>
+                </div>
+                <div class="drawer" id="drawer">
                 <div class="head">
                     <div class="title">Cleaning replay</div>
                     <select class="picker" aria-label="Cleaning session"></select>
@@ -708,10 +809,16 @@ class OpenNeatoReplayCard extends HTMLElement {
                     <span class="clock total">0:00</span>
                     <button class="live" hidden></button>
                 </div>
+                </div>
             </ha-card>
         `;
 
         this._card = root.querySelector("ha-card");
+        this._summary = root.querySelector(".summary");
+        this._tileWrap = root.querySelector(".tilewrap");
+        this._plain = root.querySelector(".plain");
+        this._chevron = root.querySelector(".chevron");
+        this._drawer = root.querySelector(".drawer");
         this._head = root.querySelector(".head");
         this._picker = root.querySelector(".picker");
         this._statsEl = root.querySelector(".stats");
@@ -756,6 +863,20 @@ class OpenNeatoReplayCard extends HTMLElement {
             this._userPicked = true;
             this._selectSession(this._picker.value);
         });
+        // A tap on the tile card on top opens or closes the replay (see TOGGLE_ACTION)
+        this._summary.addEventListener("ll-custom", (ev) => {
+            if (ev.detail?.openneato_replay_card !== "toggle") return;
+            ev.stopPropagation();
+            this._setOpen(!this._open);
+        });
+        this._chevron.addEventListener("click", () => this._setOpen(!this._open));
+        this._plain.addEventListener("click", () => this._setOpen(!this._open));
+        this._plain.addEventListener("keydown", (ev) => {
+            if (ev.key === "Enter" || ev.key === " ") {
+                ev.preventDefault();
+                this._setOpen(!this._open);
+            }
+        });
         this._delBtn.addEventListener("click", () => this._deleteSelected());
         this._playBtn.addEventListener("click", () => this._togglePlay());
         this._restartBtn.addEventListener("click", () => this._restart());
@@ -779,6 +900,105 @@ class OpenNeatoReplayCard extends HTMLElement {
 
         this._bindGestures();
         this._observeResize();
+    }
+
+    /* ---- tile summary and the drawer ---- */
+
+    // The robot the tile card shows: the one in the options, else the first
+    // OpenNeato vacuum Home Assistant knows of.
+    _summaryEntity() {
+        if (this._config.entity) return this._config.entity;
+        const entities = (this._hass && this._hass.entities) || {};
+        const found = Object.values(entities).find(
+            (e) => e.platform === "openneato" && String(e.entity_id).startsWith("vacuum."),
+        );
+        return found ? found.entity_id : undefined;
+    }
+
+    // Brings the summary, the tile card and the drawer in line with the
+    // options and with whether the replay is open.
+    _applyLayout() {
+        if (!this._built) return;
+        const collapsible = this._collapsible;
+        this._card.classList.toggle("collapsible", collapsible);
+        this._summary.hidden = !collapsible;
+        this._drawer.hidden = !this._open;
+        this._chevron.setAttribute("aria-expanded", String(this._open));
+        this._chevron.setAttribute("aria-label", this._open ? "Hide the cleaning replay" : "Show the cleaning replay");
+        if (!collapsible) return;
+
+        const title = this._config.title !== undefined ? this._config.title : "Cleaning replay";
+        this._plain.textContent = this._config.name || title;
+        const entity = this._summaryEntity();
+        if (!entity || !window.loadCardHelpers) {
+            // Nothing for a tile card to show: a plain title row stands in for it
+            this._tileWrap.hidden = true;
+            this._plain.hidden = false;
+            return;
+        }
+        this._plain.hidden = true;
+        this._tileWrap.hidden = false;
+        const tile = tileConfig(this._config, entity);
+        if (this._tile) {
+            this._tile.setConfig(tile);
+        } else if (customElements.get("hui-tile-card")) {
+            this._createTile(tile);
+        } else if (!this._tileLoading) {
+            // The tile card is loaded on demand; the card helpers load it
+            this._tileLoading = true;
+            window.loadCardHelpers().then(async (helpers) => {
+                helpers.createCardElement({ type: "tile", entity });
+                await customElements.whenDefined("hui-tile-card");
+                this._tileLoading = false;
+                if (!this._tile && this._collapsible) {
+                    this._createTile(tileConfig(this._config, this._summaryEntity() || entity));
+                }
+            });
+        }
+    }
+
+    _createTile(tile) {
+        this._tile = document.createElement("hui-tile-card");
+        this._tile.setConfig(tile);
+        if (this._hass) this._tile.hass = this._hass;
+        this._tileWrap.replaceChildren(this._tile);
+    }
+
+    // Whether the replay is open is remembered in this browser, per robot
+    get _storageKey() {
+        return `openneato-replay-card:${this._config.entity || this._config.title || "card"}`;
+    }
+
+    _storedOpen() {
+        try {
+            const value = window.localStorage.getItem(this._storageKey);
+            return value === null ? undefined : value === "1";
+        } catch (err) {
+            return undefined;
+        }
+    }
+
+    _setOpen(open) {
+        if (!this._collapsible || open === this._open) return;
+        this._open = open;
+        try {
+            window.localStorage.setItem(this._storageKey, open ? "1" : "0");
+        } catch (err) {
+            // Storage can be unavailable (private windows); the card still works
+        }
+        this._applyLayout();
+        if (open) {
+            // Catch up at once: the list and the picture may be old by now
+            this._lastListAt = 0;
+            if (this.isConnected) this._ensurePoll();
+            this._tick();
+            this._dirty = true;
+            this._scheduleRender();
+        } else {
+            // Stop everything that costs the robot or the browser anything
+            this._stopLoop();
+            this._stopPoll();
+        }
     }
 
     _observeResize() {
@@ -876,7 +1096,7 @@ class OpenNeatoReplayCard extends HTMLElement {
     // Both polls pause while the dashboard tab is hidden; _onVisibility
     // catches up the moment it is shown again.
     _tick() {
-        if (!this._hass || document.hidden) return;
+        if (!this._hass || document.hidden || !this._open) return;
         const now = Date.now();
         if (now - this._lastListAt >= SESSIONS_REFRESH_MS) this._loadSessions();
         const wantsLive = this._live || this._finalDue;
@@ -899,7 +1119,7 @@ class OpenNeatoReplayCard extends HTMLElement {
     _startDurationTicker() {
         if (this._durTimer) return;
         this._durTimer = setInterval(() => {
-            if (this._live && !document.hidden) this._renderStats();
+            if (this._live && !document.hidden && this._open) this._renderStats();
         }, 1000);
     }
 
@@ -1507,6 +1727,11 @@ class OpenNeatoReplayCard extends HTMLElement {
     }
 
     _scheduleRender() {
+        // Nothing is drawn while collapsed; opening draws the latest state
+        if (!this._open) {
+            this._dirty = true;
+            return;
+        }
         if (this._raf === null) this._startLoop();
     }
 
