@@ -29,6 +29,7 @@ from .lidar_mapper import (
     MERGE_MIN_OVERLAP,
     plan_calibration,
     AccumulatedMap,
+    align_near,
     align_to_reference,
     build_session_grids,
     parse_pose,
@@ -55,6 +56,10 @@ MIN_CAPTURES = 60            # below this a run is too thin to be worth merging
 # at most this often, since fitting is CPU-bound.
 LIVE_ALIGN_MIN_CAPTURES = 20
 LIVE_ALIGN_EVERY = 60.0      # seconds
+# A clean's first few walls can match a small patch of the map almost anywhere,
+# with an overlap score that looks excellent. A fit near the last clean's
+# alignment is kept unless another fits better than this.
+LIVE_ALIGN_PREFER_MARGIN = 0.05
 BYTES_PER_POSE = 48          # firmware writes ~48 bytes per snapshot, every 2 s
 MAX_INTERVAL = 12.0
 
@@ -401,6 +406,12 @@ class LidarMapRunner:
             quarter, dx, dy, overlap = await self.hass.async_add_executor_job(
                 align_to_reference, walls, self._map.walls
             )
+            if self._live_guess:
+                near = await self.hass.async_add_executor_job(
+                    align_near, walls, self._map.walls, self._live_guess
+                )
+                if near[3] >= MERGE_MIN_OVERLAP and near[3] >= overlap - LIVE_ALIGN_PREFER_MARGIN:
+                    quarter, dx, dy, overlap = near
         finally:
             self._live_align_busy = False
         _LOGGER.debug(
@@ -410,6 +421,14 @@ class LidarMapRunner:
         if overlap >= MERGE_MIN_OVERLAP:
             self._live_align = (quarter, dx, dy)
         return self._live_align or self._live_guess
+
+    def live_alignment_source(self, session_name: str) -> str:
+        """What the live run is drawn with: its own fit, the last run's, or none."""
+        if not self._collecting or session_name != self._session_name:
+            return "none"
+        if self._live_align:
+            return "live"
+        return "previous" if self._live_guess else "none"
 
     def view_rotation(self, user_offset: float = 0.0) -> float:
         """Rotation that stands the map upright, plus the user's offset."""
