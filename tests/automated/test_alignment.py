@@ -170,3 +170,13 @@ async def test_finished_run_keeps_its_live_fit_until_merged(hass: HomeAssistant)
     runner._captures = []
     await runner._finish()
     assert runner.alignment(NAME) == (1, -6, -3)
+
+
+async def test_finished_run_found_under_its_compressed_name(hass: HomeAssistant) -> None:
+    """A clean recorded as <start>.jsonl is listed as <start>.jsonl.hs once it ends."""
+    runner = lidar_runner.LidarMapRunner(hass, "entry", None, SimpleNamespace(async_add_listener=lambda *_: None))
+    runner._map = lidar_mapper.AccumulatedMap({})
+    runner._map.alignments["1791669270.jsonl"] = (1, -6, -3)
+    assert runner.alignment("1791669270.jsonl.hs") == (1, -6, -3)
+    assert runner.alignment("1791669270.jsonl") == (1, -6, -3)
+    assert runner.alignment("4030.jsonl.hs") is None
