@@ -261,9 +261,11 @@
     localStorage.removeItem("openneato-replay-card:speed");
   });
 
-  /* ── the card: a tile card, and what is under it ─────────────────────── */
+  /* ── the card: a tile card, and its features ─────────────────────────── */
 
   const hasCard = () => source().includes("withReadouts");
+  const hasFeaturesList = () => source().includes("openneato-feature-editor");
+  const REPLAY = { type: "custom:openneato-replay" };
   const tileOf = (el) => el.shadowRoot.querySelector("hui-tile-card");
   const chevron = (el) => el.shadowRoot.querySelector(".chevron");
   const tileInfo = (el) => findDeep(tileOf(el).shadowRoot, "ha-tile-info");
@@ -271,9 +273,12 @@
   const tileReady = (el) => until(() => tileOf(el) && tileText(el).includes("Test Robot") && tileInfo(el), "the tile card");
   const replayIn = (el) => findDeep(el.shadowRoot, "openneato-replay");
   const controlsIn = (el) => findDeep(el.shadowRoot, "openneato-controls");
+  const suctionIn = (el) => findDeep(el.shadowRoot, "openneato-suction");
   const configIn = (el) => findDeep(el.shadowRoot, "openneato-configuration");
   const keysOf = (feature) => [...feature.shadowRoot.querySelectorAll("[data-key]")].map((b) => b.dataset.key);
   const keyed = (feature, key) => feature.shadowRoot.querySelector(`[data-key="${key}"]`);
+  // The test frontend has no backend translations, so a binary sensor reads "on", not "Charging"
+  const CHARGING = /Charging|(^|[^A-Za-z])on([^A-Za-z]|$)/;
 
   function mountCard(config = {}, h = hass()) {
     const el = document.createElement(CARD);
@@ -287,15 +292,14 @@
   test("card: the tile shows the robot, with State, Charging and Battery level by default", hasCard, async () => {
     clearStage();
     forgetOpenState();
-    const el = mountCard({ entity: VACUUM });
+    const el = mountCard({ entity: VACUUM, features: [REPLAY] });
     await tileReady(el);
-    // The test frontend has no backend translations, so a binary sensor reads "on", not "Charging"
-    await until(() => /Charging|(^|[^A-Za-z])on([^A-Za-z]|$)/.test(tileText(el)) && tileText(el).includes("85"), "the sensors on the tile");
+    await until(() => CHARGING.test(tileText(el)) && tileText(el).includes("85"), "the sensors on the tile");
     const text = tileText(el);
     expect(/docked/i.test(text), `the state is missing: ${text}`);
     expect(!text.includes("ST_C_Standby") && !text.includes("UIMGR"), `a raw state is shown: ${text}`);
     expect(!text.includes("-55"), `the Wi-Fi signal is shown without being asked for: ${text}`);
-    expect(text.indexOf("85") > text.search(/Charging|(^|[^A-Za-z])on([^A-Za-z]|$)/), `the order is not State, Charging, Battery level: ${text}`);
+    expect(text.indexOf("85") > text.search(CHARGING), `the order is not State, Charging, Battery level: ${text}`);
   });
 
   test("card: State content can show any sensor of the robot", hasCard, async () => {
@@ -304,7 +308,7 @@
     const el = mountCard({ entity: VACUUM, state_content: ["state", "wifi_signal", "uptime"] });
     await tileReady(el);
     await until(() => tileText(el).includes("-55") && tileText(el).includes("29"), "the chosen sensors");
-    expect(!/Charging|(^|[^A-Za-z])on([^A-Za-z]|$)/.test(tileText(el).replace("Test Robot", "")), "a sensor that was not chosen is shown");
+    expect(!CHARGING.test(tileText(el).replace("Test Robot", "")), "a sensor that was not chosen is shown");
   });
 
   test("card: the old battery_level name still works in State content", hasCard, async () => {
@@ -326,12 +330,12 @@
     expect(el._tileHass().states[VACUUM] === first, "the state was made again with nothing changed, so the tile would redraw");
   });
 
-  test("card: closed on load, with nothing created and nothing asked of the robot", hasCard, async () => {
+  test("card: closed on load, with no feature created and nothing asked of the robot", hasCard, async () => {
     clearStage();
     forgetOpenState();
     countWsCalls();
     const before = openneatoCalls();
-    const el = mountCard({ entity: VACUUM, controls: ["start"] });
+    const el = mountCard({ entity: VACUUM, features: [REPLAY, { type: "custom:openneato-controls", items: ["start"] }] });
     await tileReady(el);
     await sleep(1200);
     expect(!replayIn(el) && !controlsIn(el), "a feature was created while closed");
@@ -344,7 +348,7 @@
     forgetOpenState();
     countWsCalls();
     const before = openneatoCalls();
-    const el = mountCard({ entity: VACUUM });
+    const el = mountCard({ entity: VACUUM, features: [REPLAY] });
     await tileReady(el);
     await press(tileInfo(el));
     const replay = await until(() => replayIn(el), "the replay to appear");
@@ -360,7 +364,7 @@
     clearStage();
     forgetOpenState();
     countWsCalls();
-    const el = mountCard({ entity: VACUUM });
+    const el = mountCard({ entity: VACUUM, features: [REPLAY] });
     await tileReady(el);
     await press(tileInfo(el));
     await until(() => replayIn(el)?.shadowRoot.querySelector(".picker")?.options.length === 3, "the replay");
@@ -374,7 +378,7 @@
   test("card: the arrow opens and closes it too, and says which", hasCard, async () => {
     clearStage();
     forgetOpenState();
-    const el = mountCard({ entity: VACUUM });
+    const el = mountCard({ entity: VACUUM, features: [REPLAY] });
     await tileReady(el);
     await press(chevron(el));
     await until(() => replayIn(el), "the replay to appear");
@@ -388,17 +392,33 @@
   test("card: the choice is remembered, and Expanded on load only sets the start", hasCard, async () => {
     clearStage();
     forgetOpenState();
-    const first = mountCard({ entity: VACUUM, expanded: true });
+    const first = mountCard({ entity: VACUUM, expanded: true, features: [REPLAY] });
     await tileReady(first);
     await until(() => replayIn(first), "an expanded card to open by itself");
     await press(tileInfo(first));
     await until(() => !replayIn(first), "the card to close");
     clearStage();
-    const second = mountCard({ entity: VACUUM, expanded: true });
+    const second = mountCard({ entity: VACUUM, expanded: true, features: [REPLAY] });
     await tileReady(second);
     await sleep(500);
     expect(!replayIn(second), "the card forgot that it was closed");
     forgetOpenState();
+  });
+
+  test("card: the replay map is optional, like any feature", hasFeaturesList, async () => {
+    clearStage();
+    forgetOpenState();
+    const el = mountCard({ entity: VACUUM, expanded: true, features: [{ type: "custom:openneato-controls", items: ["start"] }] });
+    await until(() => controlsIn(el), "the controls");
+    expect(!replayIn(el), "a replay map that was not in the features list");
+  });
+
+  test("card: a replay-only card from before still shows its replay, with its options", hasFeaturesList, async () => {
+    clearStage();
+    forgetOpenState();
+    const el = mountCard({ entity: VACUUM, expanded: true, show_picker: false, units: "imperial", title: "Old title" });
+    const replay = await until(() => replayIn(el), "the replay");
+    expectEqual([replay._config.show_picker, replay._config.units], [false, "imperial"], "the replay's options");
   });
 
   test("card: without a robot in the options it finds the OpenNeato robot itself", hasCard, async () => {
@@ -418,72 +438,91 @@
     expect(!visible(chevron(el)), "an arrow without a robot");
   });
 
-  test("controls: the buttons are the ones chosen, in the order chosen", hasCard, async () => {
-    clearStage();
-    forgetOpenState();
-    const el = mountCard({ entity: VACUUM, expanded: true, controls: ["dock", "start", "fan_speed"] });
-    const controls = await until(() => controlsIn(el), "the controls");
-    await until(() => keysOf(controls).length === 5, "the buttons");
-    expectEqual(keysOf(controls), ["dock", "start", "fan_eco", "fan_normal", "fan_intense"], "the buttons");
-    expectEqual(keyed(controls, "fan_normal").getAttribute("aria-pressed"), "true", "the current suction");
+  test("card picker: a preview of a representative card, and no description", hasFeaturesList, async () => {
+    const entry = window.customCards.find((c) => c.type === CARD);
+    expectEqual(entry, { type: CARD, name: "OpenNeato", preview: true }, "the card picker entry");
+    expectEqual(customElements.get(CARD).getStubConfig(hass()), {
+      type: `custom:${CARD}`, entity: VACUUM,
+      features: [REPLAY, { type: "custom:openneato-controls", items: ["start", "pause", "dock"] }],
+    }, "the stub");
   });
 
-  test("controls: a button does what it says, through Home Assistant", hasCard, async () => {
+  /* ── the features ────────────────────────────────────────────────────── */
+
+  test("controls: the buttons are the ones chosen, in the order chosen, and do what they say", hasFeaturesList, async () => {
     clearStage();
     forgetOpenState();
-    const el = mountCard({ entity: VACUUM, expanded: true, controls: ["start", "fan_speed"] });
+    const el = mountCard({ entity: VACUUM, expanded: true, features: [{ type: "custom:openneato-controls", items: ["dock", "start"] }] });
     const controls = await until(() => controlsIn(el), "the controls");
-    await until(() => keyed(controls, "start"), "the Start button");
-    const start = keyed(controls, "start");
-    await press(start);
-    try {
-      await until(() => hass().states[VACUUM].state === "cleaning", "the robot to start");
-    } catch (err) {
-      const r = start.getBoundingClientRect();
-      throw new Error(`${err.message}; button ${Math.round(r.width)}x${Math.round(r.height)} at ${Math.round(r.left)},${Math.round(r.top)}; `
-        + `host _hass=${!!controls._hass}, entity=${controls._entityId}, state=${hass().states[VACUUM].state}, `
-        + `top element there: ${document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.tagName}`);
-    }
+    await until(() => keysOf(controls).length === 2, "the buttons");
+    expectEqual(keysOf(controls), ["dock", "start"], "the buttons");
+    await press(keyed(controls, "start"));
+    await until(() => hass().states[VACUUM].state === "cleaning", "the robot to start");
     await until(() => /cleaning/i.test(tileText(el)), "the tile to show it");
-    await press(keyed(controls, "fan_intense"));
-    await until(() => keyed(controls, "fan_intense").getAttribute("aria-pressed") === "true", "the suction to change");
-    expectEqual(keyed(controls, "fan_normal").getAttribute("aria-pressed"), "false", "the old suction");
   });
 
-  test("configuration: switches toggle and choices change, in the order chosen", hasCard, async () => {
+  test("suction: its own feature, every level by default, the current one pressed", hasFeaturesList, async () => {
     clearStage();
     forgetOpenState();
-    const el = mountCard({ entity: VACUUM, expanded: true, configuration: ["stealth_led", "eco_mode", "navigation_mode"] });
+    const el = mountCard({ entity: VACUUM, expanded: true, features: [{ type: "custom:openneato-suction" }] });
+    const suction = await until(() => suctionIn(el), "the suction");
+    await until(() => keysOf(suction).length === 3, "the levels");
+    expectEqual(keysOf(suction), ["eco", "normal", "intense"], "the levels");
+    expectEqual(keyed(suction, "normal").getAttribute("aria-pressed"), "true", "the current level");
+    await press(keyed(suction, "intense"));
+    await until(() => keyed(suction, "intense").getAttribute("aria-pressed") === "true", "the level to change");
+    expectEqual(keyed(suction, "normal").getAttribute("aria-pressed"), "false", "the old level");
+  });
+
+  test("suction: customized levels show in the order chosen", hasFeaturesList, async () => {
+    clearStage();
+    forgetOpenState();
+    const el = mountCard({ entity: VACUUM, expanded: true, features: [{ type: "custom:openneato-suction", fan_speeds: ["intense", "eco"] }] });
+    const suction = await until(() => suctionIn(el), "the suction");
+    await until(() => keysOf(suction).length === 2, "the levels");
+    expectEqual(keysOf(suction), ["intense", "eco"], "the levels");
+  });
+
+  test("configuration: switches and choices in the order chosen, without the suction switches", hasFeaturesList, async () => {
+    clearStage();
+    forgetOpenState();
+    const el = mountCard({
+      entity: VACUUM, expanded: true,
+      features: [{ type: "custom:openneato-configuration", items: ["stealth_led", "eco_mode", "navigation_mode"] }],
+    });
     const config = await until(() => configIn(el), "the configuration");
-    await until(() => keysOf(config).length === 3, "the controls");
-    expectEqual(keysOf(config), ["stealth_led", "eco_mode", "navigation_mode"], "the order");
-    expectEqual(keyed(config, "eco_mode").textContent.trim(), "Eco mode", "the label is the name on the device");
-    expectEqual(keyed(config, "eco_mode").getAttribute("aria-pressed"), "false", "eco mode before");
-    await press(keyed(config, "eco_mode"));
-    await until(() => keyed(config, "eco_mode").getAttribute("aria-pressed") === "true", "eco mode to turn on");
-    const select = keyed(config, "navigation_mode");
-    expectEqual([...select.options].map((o) => o.value), ["normal", "gentle", "deep"], "the choices");
-    select.value = "gentle";
-    select.dispatchEvent(new Event("change"));
+    await until(() => keysOf(config).length === 2, "the settings");
+    expectEqual(keysOf(config), ["stealth_led", "navigation_mode"], "the settings (Eco mode is suction, so it is left out)");
+    expectEqual(keyed(config, "stealth_led").textContent.trim(), "Stealth LED", "the label is the name on the device");
+    expectEqual(keyed(config, "stealth_led").getAttribute("aria-pressed"), "true", "before");
+    await press(keyed(config, "stealth_led"));
+    await until(() => keyed(config, "stealth_led").getAttribute("aria-pressed") === "false", "the switch to turn off");
+    const choice = keyed(config, "navigation_mode");
+    expectEqual([...choice.options].map((o) => o.value), ["normal", "gentle", "deep"], "the choices");
+    choice.value = "gentle";
+    choice.dispatchEvent(new Event("change"));
     await until(() => hass().states["select.test_robot_navigation_mode"].state === "gentle", "the choice to change");
   });
 
-  test("features: they work in any tile card for the robot", hasCard, async () => {
+  test("features: they work in any tile card for the robot", hasFeaturesList, async () => {
     clearStage();
     const helpers = await window.loadCardHelpers();
     const tile = await helpers.createCardElement({
-      type: "tile", entity: VACUUM, features: [{ type: "custom:openneato-controls", items: ["start", "dock"] }],
+      type: "tile", entity: VACUUM,
+      features: [{ type: "custom:openneato-controls", items: ["start", "dock"] }, { type: "custom:openneato-suction" }],
     });
     tile.hass = hass();
     stage().append(tile);
     const controls = await until(() => findDeep(tile.shadowRoot, "openneato-controls"), "the controls in a plain tile card");
     await until(() => keysOf(controls).length === 2, "the buttons");
     expectEqual(keysOf(controls), ["start", "dock"], "the buttons");
+    expect(findDeep(tile.shadowRoot, "openneato-suction"), "the suction in a plain tile card");
   });
 
-  test("features: Home Assistant offers them only for the OpenNeato robot", hasCard, async () => {
+  test("features: Home Assistant offers the four of them only for the OpenNeato robot", hasFeaturesList, async () => {
     const features = window.customCardFeatures.filter((f) => f.type.startsWith("openneato-"));
-    expectEqual(features.map((f) => f.type).sort(), ["openneato-configuration", "openneato-controls", "openneato-replay"], "the features");
+    expectEqual(features.map((f) => f.type).sort(),
+      ["openneato-configuration", "openneato-controls", "openneato-replay", "openneato-suction"], "the features");
     for (const f of features) {
       expect(f.configurable, `${f.type} cannot be edited`);
       expect(f.isSupported(hass(), { entity_id: VACUUM }), `${f.type} is not offered for the robot`);
@@ -491,143 +530,156 @@
     }
   });
 
-  /* ── the editor ──────────────────────────────────────────────────────── */
-
-  const EDITOR = "openneato-editor";
-  const hasEditor = () => source().includes('"openneato-editor"');
+  /* ── the editors ─────────────────────────────────────────────────────── */
 
   // An editor as the dashboard hosts it: every saved configuration is handed
   // back to it, and kept here for the test to check
-  async function hostedEditor(config, context) {
-    const el = document.createElement(EDITOR);
-    el.hass = hass();
-    if (context) el.context = context;
-    el.setConfig(config);
+  function hosted(tag, config, context) {
+    const el = document.createElement(tag);
     const saved = [];
     el.addEventListener("config-changed", (ev) => {
       saved.push(ev.detail.config);
       el.setConfig(ev.detail.config);
     });
+    el.hass = hass();
+    if (context) el.context = context;
+    el.setConfig(config);
     stage().append(el);
-    const form = await until(() => {
-      const f = el.shadowRoot.querySelector("ha-form");
-      return f?.schema?.length && f;
-    }, "the editor's form");
-    return { el, form, saved };
+    return { el, saved };
   }
-  const fieldNames = (schema) => schema.flatMap((item) => (item.schema ? fieldNames(item.schema) : [item.name]));
-  const sections = (form) => form.schema.filter((item) => item.type === "expandable");
-  const field = (form, name) => form.schema.flatMap((i) => (i.schema ? i.schema : [i])).find((i) => i.name === name);
-  const edit = (form, changes) => form.dispatchEvent(new CustomEvent("value-changed", { detail: { value: { ...form.data, ...changes } } }));
   const last = (saved) => saved[saved.length - 1];
-  const cardConfig = { type: `custom:${CARD}`, entity: VACUUM };
+  const flat = (schema) => schema.flatMap((item) => (Array.isArray(item.schema) ? flat(item.schema) : [item]));
+  const names = (schema) => flat(schema).map((i) => i.name);
+  const cardConfig = { type: `custom:${CARD}`, entity: VACUUM, features: [REPLAY] };
 
-  test("editor: the card offers it, and each feature its own", hasEditor, async () => {
-    expectEqual(customElements.get(CARD).getConfigElement().tagName.toLowerCase(), EDITOR, "the card's editor");
-    for (const tag of ["openneato-replay", "openneato-controls", "openneato-configuration"]) {
-      expectEqual(customElements.get(tag).getConfigElement().tagName.toLowerCase(), EDITOR, `${tag}'s editor`);
+  async function cardEditor(config) {
+    const { el, saved } = hosted("openneato-card-editor", config);
+    const tileEditor = await until(() => el.shadowRoot.querySelector("openneato-tile-card-editor"), "the tile card's editor");
+    const tileForm = await until(() => tileEditor.shadowRoot?.querySelector("ha-form")?.schema && tileEditor.shadowRoot.querySelector("ha-form"),
+      "the tile card editor's form");
+    return { el, saved, tileEditor, tileForm, own: el.shadowRoot.getElementById("form") };
+  }
+
+  async function featureEditor(config) {
+    const { el, saved } = hosted("openneato-feature-editor", config, { entity_id: VACUUM });
+    const form = await until(() => el.querySelector("ha-form")?.schema && el.querySelector("ha-form"), "the feature's form");
+    return { el, saved, form };
+  }
+  const editFeature = (form, changes) => form.dispatchEvent(new CustomEvent("value-changed", { detail: { value: { ...form.data, ...changes } } }));
+
+  test("card editor: it is the tile card's own editor, with its features list, and without Tap behavior", hasFeaturesList, async () => {
+    clearStage();
+    const { tileEditor, tileForm } = await cardEditor(cardConfig);
+    expect(tileEditor instanceof customElements.get("hui-tile-card-editor"), "not the tile card's editor");
+    const fields = names(tileForm.schema);
+    expect(fields.includes("entity") && fields.includes("state_content"), `the tile card's fields are missing: ${fields}`);
+    expect(!fields.includes("tap_action"), "Tap behavior is offered, but a tap shows and hides the features");
+    expect(fields.includes("icon_tap_action"), "the icon's tap behavior is missing");
+    expectEqual(flat(tileForm.schema).find((i) => i.name === "entity").selector, { entity: { include_entities: [VACUUM] } }, "the robot picker");
+    await until(() => findDeep(tileEditor.shadowRoot, "hui-card-features-editor"), "the tile card's features list");
+  });
+
+  test("card editor: one panel of its own, with Expanded on load", hasFeaturesList, async () => {
+    clearStage();
+    const { el, saved, own } = await cardEditor(cardConfig);
+    expectEqual(el.shadowRoot.querySelector('[slot="header"]').textContent.trim(), "OpenNeato", "the panel");
+    expectEqual(names(own.schema), ["expanded"], "the card's own options");
+    expectEqual(own.computeLabel(own.schema[0]), "Expanded on load", "the label");
+    own.dispatchEvent(new CustomEvent("value-changed", { detail: { value: { expanded: true } } }));
+    expectEqual(last(saved), { ...cardConfig, expanded: true }, "on");
+    own.dispatchEvent(new CustomEvent("value-changed", { detail: { value: { expanded: false } } }));
+    expectEqual(last(saved), cardConfig, "off");
+  });
+
+  test("card editor: a change in the tile card's editor keeps Expanded on load", hasFeaturesList, async () => {
+    clearStage();
+    const { saved, tileEditor } = await cardEditor({ ...cardConfig, expanded: true });
+    tileEditor.dispatchEvent(new CustomEvent("config-changed", {
+      detail: { config: { type: "tile", entity: VACUUM, name: "Robbie", features: [REPLAY] } }, bubbles: true, composed: true,
+    }));
+    expectEqual(last(saved), { type: `custom:${CARD}`, entity: VACUUM, name: "Robbie", features: [REPLAY], expanded: true }, "the saved card");
+  });
+
+  test("card editor: an older replay-only card becomes a Replay map feature", hasFeaturesList, async () => {
+    clearStage();
+    const { saved } = await cardEditor({ type: `custom:${CARD}`, entity: VACUUM, units: "imperial", show_picker: false, title: "x", speed: 16 });
+    expectEqual(saved[0], {
+      type: `custom:${CARD}`, entity: VACUUM, features: [{ type: "custom:openneato-replay", units: "imperial", show_picker: false }],
+    }, "the converted card");
+  });
+
+  test("card editor: State content is offered the robot's sensors by their names, not its raw states", hasFeaturesList, async () => {
+    clearStage();
+    const { tileEditor } = await cardEditor(cardConfig);
+    const state = tileEditor.hass.states[VACUUM];
+    const offered = Object.keys(state.attributes);
+    for (const wanted of ["battery", "charging", "wifi_signal"]) expect(offered.includes(wanted), `no ${wanted} to pick: ${offered}`);
+    for (const unwanted of ["robot_state", "ui_state", "battery_level"]) expect(!offered.includes(unwanted), `${unwanted} is offered`);
+    const name = (a) => tileEditor.hass.formatEntityAttributeName(state, a);
+    expectEqual([name("battery"), name("charging"), name("wifi_signal")], ["Battery level", "Charging", "WiFi signal"], "the names");
+  });
+
+  test("feature editor: Replay map has every option the replay card had, in the order they show", hasFeaturesList, async () => {
+    clearStage();
+    const { form } = await featureEditor(REPLAY);
+    expectEqual(names(form.schema), [
+      "show_picker", "show_distance", "show_duration", "show_battery", "units", "height", "fit", "rotation",
+      "floorplan", "floorplan_opacity", "grid", "grid_lines", "tiled_plan", "tiled_coverage", "trail", "autoplay", "session",
+    ], "the fields");
+    expect(form.computeHelper(form.schema[0]).includes("latest run"), "no note on what the map shows without the picker");
+    expectEqual(flat(form.schema).find((i) => i.name === "units").selector.select.options.map((o) => o.label),
+      ["Auto", "Metric", "US customary"], "the units");
+    expectEqual(form.data.rotation, "auto", "the rotation");
+    expectEqual(form.data.floorplan, true, "the floorplan");
+  });
+
+  test("feature editor: Replay map saves only what differs from the defaults", hasFeaturesList, async () => {
+    clearStage();
+    const { form, saved } = await featureEditor(REPLAY);
+    editFeature(form, { units: "imperial", rotation: "90", floorplan: false });
+    expectEqual(last(saved), { ...REPLAY, units: "imperial", rotation: 90, floorplan: false }, "the changes");
+    editFeature(form, { rotation: "auto", floorplan: true });
+    expectEqual(last(saved), { ...REPLAY, units: "imperial" }, "back to the defaults");
+    editFeature(form, { grid: false });
+    expectEqual(last(saved), { ...REPLAY, units: "imperial", grid: false }, "Grid off, its parts following it");
+    editFeature(form, { grid_lines: true });
+    expectEqual(last(saved), { ...REPLAY, units: "imperial", grid: false, grid_lines: true }, "the grid lines on their own");
+  });
+
+  test("feature editor: Controls is a sortable list, without the suction", hasFeaturesList, async () => {
+    clearStage();
+    const { form, saved } = await featureEditor({ type: "custom:openneato-controls", items: ["start"] });
+    const selector = form.schema[0].selector.select;
+    expect(selector.multiple && selector.reorder, "not a sortable list");
+    expectEqual(selector.options.map((o) => o.value), ["start", "pause", "stop", "dock", "spot", "locate"], "the controls");
+    editFeature(form, { items: ["dock", "start"] });
+    expectEqual(last(saved), { type: "custom:openneato-controls", items: ["dock", "start"] }, "the order chosen");
+    expectEqual(customElements.get("openneato-controls").getStubConfig(hass(), { entity_id: VACUUM }),
+      { type: "custom:openneato-controls", items: ["start", "pause", "dock"] }, "what a new Controls feature starts with");
+  });
+
+  test("feature editor: Suction shows every level until customized, as Home Assistant's own editors do", hasFeaturesList, async () => {
+    clearStage();
+    const { form, saved } = await featureEditor({ type: "custom:openneato-suction" });
+    expectEqual(names(form.schema), ["customize_fan_speeds"], "not customized");
+    editFeature(form, { customize_fan_speeds: true });
+    expectEqual(last(saved), { type: "custom:openneato-suction", fan_speeds: ["eco", "normal", "intense"] }, "customized");
+    await until(() => names(form.schema).includes("fan_speeds"), "the levels list");
+    editFeature(form, { customize_fan_speeds: false });
+    expectEqual(last(saved), { type: "custom:openneato-suction" }, "not customized again");
+  });
+
+  test("feature editor: Configuration offers the robot's settings by name, without suction or the schedule", hasFeaturesList, async () => {
+    clearStage();
+    const { form } = await featureEditor({ type: "custom:openneato-configuration", items: [] });
+    expectEqual(form.schema[0].selector.select.options.map((o) => o.label), ["Navigation mode", "Stealth LED"], "the settings");
+  });
+
+  test("editors: each feature opens the same feature editor", hasFeaturesList, async () => {
+    for (const tag of ["openneato-replay", "openneato-controls", "openneato-suction", "openneato-configuration"]) {
+      expectEqual(customElements.get(tag).getConfigElement().tagName.toLowerCase(), "openneato-feature-editor", `${tag}'s editor`);
     }
-  });
-
-  test("editor: Robot and State content first, then Replay map, Controls and Configuration", hasEditor, async () => {
-    clearStage();
-    const { form } = await hostedEditor(cardConfig);
-    expectEqual(form.schema.map((i) => i.name || i.title), ["entity", "state_content", "Replay map", "Controls", "Configuration"], "the form's parts");
-    expectEqual(form.schema[1].selector.ui_state_content.entity_id, VACUUM, "State content is for the robot");
-    for (const text of ["Replay map", "Controls", "Configuration"]) {
-      await until(() => deepText(form.shadowRoot).includes(text), `the ${text} section`);
-    }
-    expect(!deepText(form.shadowRoot).includes("Parts of the card"), "the old Parts of the card section is still there");
-  });
-
-  test("editor: Replay map has Expanded on load first, then the options in the order they show on the card", hasEditor, async () => {
-    clearStage();
-    const { form } = await hostedEditor(cardConfig);
-    expectEqual(fieldNames(sections(form)[0].schema),
-      ["expanded", "show_picker", "show_distance", "show_duration", "show_battery", "units", "height", "fit", "grid", "trail", "autoplay"],
-      "the Replay map options");
-    expectEqual(fieldNames(form.schema).includes("show_stats"), false, "the old show_stats switch");
-  });
-
-  test("editor: labels are plain, and Units uses Home Assistant's own words", hasEditor, async () => {
-    clearStage();
-    const { form } = await hostedEditor(cardConfig);
-    const label = (name) => form.computeLabel({ name });
-    expectEqual(label("expanded"), "Expanded on load", "expanded");
-    expectEqual(fieldNames(form.schema).includes("speed"), false, "a playback speed option");
-    expectEqual(["show_picker", "show_distance", "show_duration", "show_battery"].map(label), ["Session picker", "Distance", "Duration", "Battery"], "the parts");
-    expectEqual(field(form, "units").selector.select.options.map((o) => o.label), ["Auto (from Home Assistant)", "Metric", "US customary"], "the units");
-    expect(form.computeHelper({ name: "show_picker" }).includes("latest run"), "no note on what the map shows without the picker");
-  });
-
-  test("editor: State content is offered the robot's sensors, not its raw states", hasEditor, async () => {
-    clearStage();
-    const { form } = await hostedEditor(cardConfig);
-    const names = Object.keys(form.hass.states[VACUUM].attributes);
-    for (const wanted of ["battery", "charging", "wifi_signal"]) expect(names.includes(wanted), `no ${wanted} to pick: ${names}`);
-    // HA hides an attribute called battery_level from the picker, so it must not be what the card offers
-    expect(!names.includes("battery_level"), "battery_level is offered, and Home Assistant hides it");
-    const name = (attribute) => form.hass.formatEntityAttributeName(form.hass.states[VACUUM], attribute);
-    expectEqual([name("battery"), name("charging"), name("wifi_signal")], ["Battery level", "Charging", "WiFi signal"], "the sensors are named as the device names them");
-    for (const unwanted of ["robot_state", "ui_state"]) expect(!names.includes(unwanted), `${unwanted} is offered`);
-    expectEqual(form.data.state_content, ["state", "charging", "battery"], "the default State content");
-  });
-
-  test("editor: the defaults are filled in, and a value set back to its default is dropped", hasEditor, async () => {
-    clearStage();
-    const { form, saved } = await hostedEditor(cardConfig);
-    expectEqual([form.data.show_picker, form.data.show_distance, form.data.units, form.data.expanded], [true, true, "auto", false], "the defaults");
-    edit(form, { units: "imperial", height: 400, show_distance: false });
-    expectEqual(last(saved), { ...cardConfig, units: "imperial", height: 400, show_distance: false }, "after the change");
-    edit(form, { units: "auto", show_distance: true });
-    expectEqual(last(saved), { ...cardConfig, height: 400 }, "back to the defaults");
-  });
-
-  test("editor: what the form does not know stays exactly as it was", hasEditor, async () => {
-    clearStage();
-    const features = [{ type: "custom:something" }];
-    const { form, saved } = await hostedEditor({ ...cardConfig, session: "4020.jsonl", name: "Alfred", features });
-    edit(form, { units: "imperial" });
-    expectEqual(last(saved), { ...cardConfig, session: "4020.jsonl", name: "Alfred", features, units: "imperial" }, "the saved configuration");
-  });
-
-  test("editor: Controls and Configuration are sortable lists of what the robot has", hasEditor, async () => {
-    clearStage();
-    const { form, saved } = await hostedEditor(cardConfig);
-    const controls = field(form, "controls").selector.select;
-    expect(controls.multiple && controls.reorder, "Controls is not a sortable multiple choice");
-    expectEqual(controls.options.map((o) => o.value), ["start", "pause", "stop", "dock", "spot", "locate", "fan_speed"], "the controls");
-    const settings = field(form, "configuration").selector.select;
-    expect(settings.multiple && settings.reorder, "Configuration is not a sortable multiple choice");
-    expectEqual(settings.options.map((o) => o.label), ["Eco mode", "Navigation mode", "Stealth LED"], "the settings, by name, without the schedule's days");
-    edit(form, { controls: ["dock", "start"] });
-    expectEqual(last(saved).controls, ["dock", "start"], "the order chosen");
-    edit(form, { controls: [] });
-    expect(!("controls" in last(saved)), "an empty list stays in the YAML");
-  });
-
-  test("editor: each feature has its own form, with the same options and order", hasEditor, async () => {
-    clearStage();
-    const replay = await hostedEditor({ type: "custom:openneato-replay", units: "imperial" }, { entity_id: VACUUM });
-    expectEqual(fieldNames(replay.form.schema),
-      ["show_picker", "show_distance", "show_duration", "show_battery", "units", "height", "fit", "grid", "trail", "autoplay"], "the replay's options");
-    edit(replay.form, { show_picker: false });
-    expectEqual(last(replay.saved), { type: "custom:openneato-replay", units: "imperial", show_picker: false }, "the replay's saved options");
-    const controls = await hostedEditor({ type: "custom:openneato-controls", items: ["start"] }, { entity_id: VACUUM });
-    expectEqual(fieldNames(controls.form.schema), ["items"], "the controls' fields");
-    edit(controls.form, { items: ["dock", "start"] });
-    expectEqual(last(controls.saved).items, ["dock", "start"], "the controls' order");
-  });
-
-  test("editor: an edited configuration works in the card", hasEditor, async () => {
-    clearStage();
-    forgetOpenState();
-    const { form, saved } = await hostedEditor(cardConfig);
-    edit(form, { expanded: true, controls: ["start"], state_content: ["state", "wifi_signal"] });
-    const el = mountCard(last(saved));
-    await tileReady(el);
-    await until(() => tileText(el).includes("-55"), "the chosen sensor on the tile");
-    await until(() => controlsIn(el) && keysOf(controlsIn(el)).includes("start"), "the chosen control");
+    expectEqual(customElements.get(CARD).getConfigElement().tagName.toLowerCase(), "openneato-card-editor", "the card's editor");
   });
 
   /* ── run ─────────────────────────────────────────────────────────────── */
@@ -651,32 +703,35 @@
   };
 
   // What the screenshots show: the card closed, open with the replay, open with
-  // controls and settings, and the editor
+  // the other features, the card's editor, and the Replay map's editor
   window.openneatoUiGallery = async () => {
     clearStage();
     forgetOpenState();
-    if (!hasCard()) {
+    if (!hasFeaturesList()) {
       const el = mountReplay();
       await readyPicker(el);
     } else {
-      const closed = mountCard({ entity: VACUUM });
+      const closed = mountCard({ entity: VACUUM, features: [REPLAY] });
       await tileReady(closed);
       forgetOpenState();
-      const replay = mountCard({ entity: VACUUM, expanded: true });
+      const replay = mountCard({ entity: VACUUM, expanded: true, features: [REPLAY] });
       await tileReady(replay);
       await until(() => replayIn(replay)?.shadowRoot.querySelector(".stats").textContent.includes("Duration"), "the replay");
       const more = mountCard({
         entity: VACUUM, expanded: true, state_content: ["state", "wifi_signal", "uptime"],
-        controls: ["start", "pause", "dock", "locate", "fan_speed"], configuration: ["eco_mode", "stealth_led", "navigation_mode"],
+        features: [
+          { type: "custom:openneato-controls", items: ["start", "pause", "dock", "locate"] },
+          { type: "custom:openneato-suction" },
+          { type: "custom:openneato-configuration", items: ["stealth_led", "navigation_mode"] },
+        ],
       });
       await tileReady(more);
-      await until(() => controlsIn(more) && keysOf(controlsIn(more)).length >= 5 && configIn(more) && keysOf(configIn(more)).length === 3, "the controls");
+      await until(() => controlsIn(more) && suctionIn(more) && configIn(more) && keysOf(configIn(more)).length === 2, "the features");
+      const { tileEditor } = await cardEditor(cardConfig);
+      await until(() => findDeep(tileEditor.shadowRoot, "hui-card-features-editor"), "the features list");
+      await featureEditor(REPLAY);
     }
-    if (hasEditor()) {
-      const { form } = await hostedEditor(cardConfig);
-      for (const text of ["Replay map", "Controls", "Configuration"]) await until(() => deepText(form.shadowRoot).includes(text), text);
-    }
-    await sleep(800);
+    await sleep(1000);
     const r = stage().getBoundingClientRect();
     return { x: r.left + window.scrollX, y: r.top + window.scrollY, width: r.width, height: r.height };
   };
