@@ -191,10 +191,12 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
   | `grid` | `true` | The Neato-app look: half-metre grid lines, and floorplan, coverage and trail drawn as a lattice of square tiles. `false` gives a flat map. |
   | `trail` | `true` | Fading track behind the robot. `false` shows cleaned / not cleaned only. |
   | `autoplay` | `false` | Start playing from the beginning as soon as a session loads. Ignored for a session that is still recording; the card follows it live instead. |
-  | `speed` | `8` | The playback rate (session seconds per real second) when the card loads. The button on the map changes it only until the page reloads. |
   | `session` | `latest` | `latest` follows the newest session; a filename pins the card to that one. YAML only. |
   | `entry_id` | *(first entry)* | Which OpenNeato config entry to read when there is more than one robot. YAML only. |
   | `rotation`, `floorplan`, `floorplan_opacity`, `grid_lines`, `tiled_plan`, `tiled_coverage` | | Finer map options, YAML only. `rotation` is `auto` or degrees; `grid_lines`, `tiled_plan` and `tiled_coverage` each follow `grid` unless set. |
+
+  The playback speed button on the map remembers its choice in the browser (8 times real time at first),
+  so it is not an option of the card.
 
   The session picker shows only the date and time of the session on screen while it is closed, and the
   full line (date, mode, area) for every session while its list is open. A session that was recorded
