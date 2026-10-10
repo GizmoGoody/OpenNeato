@@ -552,7 +552,7 @@
   }
   const last = (saved) => saved[saved.length - 1];
   const flat = (schema) => schema.flatMap((item) => (Array.isArray(item.schema) ? flat(item.schema) : [item]));
-  const names = (schema) => flat(schema).map((i) => i.name);
+  const names = (schema) => flat(schema).filter((i) => i.name).map((i) => i.name);
   const cardConfig = { type: `custom:${CARD}`, entity: VACUUM, features: [REPLAY] };
 
   async function cardEditor(config) {
@@ -657,6 +657,24 @@
       floorplan: { tiled: true }, grid: false, coverage: { trail: false },
     }, "a fixed angle, no grid, no trail");
     expectEqual(flat(form.schema).find((i) => i.name === "degrees").helper, "The map's angle.", "the rotation's helper without straightening");
+  });
+
+  test("feature editor: Home Assistant's dividers set apart the options kept together in YAML", hasFeaturesList, async () => {
+    clearStage();
+    const { form } = await featureEditor(REPLAY);
+    const layout = flat(form.schema).map((i) => (i.type === "divider" ? "|" : i.name)).join(" ");
+    expectEqual(layout, "selector distance duration battery hide_labels | autoplay units height fit | straighten degrees | "
+      + "floorplan floorplan_tiled floorplan_opacity | grid | trail coverage_tiled", "the fields and dividers");
+    await until(() => form.shadowRoot?.querySelector("ha-form-divider"), "a divider on the form");
+  });
+
+  test("feature editor: a group deleted from the YAML stays deleted when another option changes", hasFeaturesList, async () => {
+    clearStage();
+    const { el, form, saved } = await featureEditor({ ...REPLAY, header: { selector: false } });
+    el.setConfig({ ...REPLAY });
+    expectEqual(form.data.selector, true, "the selector back to its default in the form");
+    editFeature(form, { autoplay: true });
+    expectEqual(last(saved), { ...REPLAY, autoplay: true }, "the saved options");
   });
 
   test("feature editor: Tiled floorplan and Floorplan opacity show only with the floorplan", hasFeaturesList, async () => {
