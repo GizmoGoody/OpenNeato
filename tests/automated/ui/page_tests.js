@@ -122,7 +122,8 @@
   // The replay as a tile card gives it to its feature: configured, then given
   // hass and the robot
   function mountReplay(config = {}) {
-    const el = document.createElement(hasReplay() ? "openneato-replay" : CARD);
+    // The replay feature, or on an older branch the replay-only card
+    const el = document.createElement(["openneato-replay", "openneato-replay-card"].find((t) => customElements.get(t)));
     el.setConfig({ type: "custom:openneato-replay", height: 240, ...config });
     el.context = { entity_id: VACUUM };
     el.hass = hass();
