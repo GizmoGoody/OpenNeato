@@ -284,8 +284,9 @@ class LidarMapRunner:
         # has stored its alignment: until it does, the live fit stands for it, so
         # the run is not drawn in the robot's raw frame in that gap. The merge
         # replaces it with its own.
-        if self._session_name and self._live_align and self._map is not None:
-            self._map.alignments.setdefault(self._session_name, self._live_align)
+        stand_in = self._live_align or self._live_guess
+        if self._session_name and stand_in and self._map is not None:
+            self._map.alignments.setdefault(self._session_name, stand_in)
         self._live_align = None
         if len(captures) < MIN_CAPTURES:
             _LOGGER.info(
