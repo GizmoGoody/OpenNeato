@@ -85,7 +85,7 @@ const DEFAULTS = {
     grid_lines: true,
     tiled_plan: true,
     tiled_coverage: true,
-    // "auto" follows Home Assistant's unit system; "metric" or "imperial"
+    // "auto" follows Home Assistant's unit system; "metric" or "us_customary"
     // overrides it.
     units: "auto",
     // Fading track of squares behind the robot. Set false for cleaned/not
@@ -183,17 +183,17 @@ function modeLabel(mode) {
     return { house: "House Clean", spot: "Spot Clean", manual: "Manual Clean" }[mode] || mode || "Clean";
 }
 
-// "metric" | "imperial" from the card option, else from Home Assistant's
+// "metric" | "us_customary" from the card option, else from Home Assistant's
 // unit system. `area` is the exact unit the user chose on recent cores;
 // `length` ("km" | "mi") is the fallback every version has. Anything else
 // in the option is treated as "auto" — a typo must not blank the card.
 function resolveUnits(config, hass) {
     const u = config && config.units;
-    if (u === "metric" || u === "imperial") return u;
+    if (u === "metric" || u === "us_customary") return u;
     const us = (hass && hass.config && hass.config.unit_system) || {};
-    if (us.area === "ft²" || us.area === "ft^2") return "imperial";
+    if (us.area === "ft²" || us.area === "ft^2") return "us_customary";
     if (us.area) return "metric";
-    return us.length === "mi" ? "imperial" : "metric";
+    return us.length === "mi" ? "us_customary" : "metric";
 }
 
 function formatNumber(value, locale, digits) {
@@ -213,7 +213,7 @@ function formatNumber(value, locale, digits) {
 function formatArea(m2, units, locale) {
     const n = Number(m2);
     if (m2 === undefined || m2 === null || Number.isNaN(n)) return "";
-    return units === "imperial"
+    return units === "us_customary"
         ? `${formatNumber(n * SQM_TO_SQFT, locale, 0)}\u00a0ft²`
         : `${formatNumber(n, locale, 1)}\u00a0m²`;
 }
@@ -221,7 +221,7 @@ function formatArea(m2, units, locale) {
 function formatDistance(m, units, locale) {
     const n = Number(m);
     if (m === undefined || m === null || Number.isNaN(n)) return "";
-    return units === "imperial"
+    return units === "us_customary"
         ? `${formatNumber(n * METERS_TO_FEET, locale, 0)}\u00a0ft`
         : `${formatNumber(n, locale, 1)}\u00a0m`;
 }
@@ -3128,7 +3128,7 @@ const FEATURE_FORMS = {
                 toggle("battery", "Battery"),
                 toggle("hide_labels", "Hide labels", "Show the figures without their names; the names show on hover."),
                 toggle("autoplay", "Autoplay"),
-                { name: "units", label: "Units", required: true, selector: select([["auto", "Auto"], ["metric", "Metric"], ["imperial", "US customary"]]) },
+                { name: "units", label: "Units", required: true, selector: select([["auto", "Auto"], ["metric", "Metric"], ["us_customary", "US customary"]]) },
                 { name: "height", label: "Height", selector: { number: { mode: "box", min: 120, max: 1200, step: 10, unit_of_measurement: "px" } } },
                 {
                     name: "fit", label: "Framing", required: true,

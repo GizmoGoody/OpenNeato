@@ -226,7 +226,7 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
   |---|---|
   | `header` | The row above the map: the session `selector` (when hidden, the map shows the latest run and follows a clean as it starts), and the session's `distance`, `duration` and `battery`; `hide_labels` shows those figures without their names, which show on hover. |
   | `autoplay` | Play from the beginning as soon as a session loads. A session that is still recording is followed live instead. |
-  | `units` | `auto` follows the Home Assistant unit system; `metric` or `imperial` overrides it. |
+  | `units` | `auto` follows the Home Assistant unit system; `metric` or `us_customary` overrides it. |
   | `height` | Map height in px. |
   | `fit` | `stable` frames the cleaned area on a 1 m grid so the view stops shifting between cleanings; `plan` keeps the whole floorplan in view; `session` is the tightest fit. |
   | `rotation` | `straighten` turns the map so the walls line up with the card, then turns it a quarter if that fills the card better; `degrees` is added to that angle. Without `straighten`, `degrees` is the map's angle. |
