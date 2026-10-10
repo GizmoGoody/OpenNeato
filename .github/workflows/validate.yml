@@ -73,6 +73,40 @@ jobs:
           # Exit code 5 means every test was skipped (the branch has none of the features)
           pytest -q -rs || [ $? -eq 5 ]
 
+  ui:
+    name: Card UI tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.branch || github.ref_name }}
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: ci-tools
+      - name: Add the tests from ci
+        run: cp -r ci-tools/tests ci-tools/pytest.ini . && rm -rf ci-tools
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Install test dependencies
+        run: pip install pytest-homeassistant-custom-component
+      - name: Run the card UI tests
+        env:
+          OPENNEATO_UI_TESTS: "1"
+          OPENNEATO_UI_OUT: ui-results
+        run: pytest tests/automated/test_card_ui.py -q -rs -s
+      - name: Keep the screenshots and the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: card-ui
+          path: ui-results
+          if-no-files-found: ignore
+
   firmware-matrix:
     name: Resolve firmware matrix
     runs-on: ubuntu-latest
