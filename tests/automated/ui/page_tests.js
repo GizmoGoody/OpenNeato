@@ -260,15 +260,31 @@
     await until(() => labelled._session && statsText(labelled).includes("Duration"), "the names to show");
   });
 
-  test("map: the live badge sits on the map, in the corner chosen", () => hasFeaturesList(), async () => {
+  test("map: the live badge sits on the map, in the corner chosen, and stays there as it redraws", () => hasFeaturesList(), async () => {
     clearStage();
-    const standard = mountReplay();
-    const badge = standard.shadowRoot.querySelector(".stage > button.live");
-    expect(badge, "the live badge is not on the map");
-    expect(!standard.shadowRoot.querySelector(".controls button.live"), "the live badge is still in the controls row");
-    expect(badge.classList.contains("bottom_right"), "not bottom right by default");
-    const top = mountReplay({ live_position: "top_left" });
-    expect(top.shadowRoot.querySelector(".stage > button.live").classList.contains("top_left"), "not where it was put");
+    const corner = async (config, expected) => {
+      const el = mountReplay(config);
+      await until(() => el._session, "the session to load");
+      expect(!el.shadowRoot.querySelector(".controls button.live"), "the live badge is still in the controls row");
+      // A live clean: the badge shows and redraws
+      el._setLive(true);
+      el._renderChip();
+      el._renderChip();
+      const badge = el.shadowRoot.querySelector(".stage .livebox button.live");
+      expect(badge && visible(badge), "the live badge does not show on the map");
+      const b = badge.getBoundingClientRect();
+      const m = el.shadowRoot.querySelector(".stage").getBoundingClientRect();
+      const insets = {
+        top_left: [b.left - m.left, b.top - m.top],
+        top_right: [m.right - b.right, b.top - m.top],
+        bottom_left: [b.left - m.left, m.bottom - b.bottom],
+        bottom_right: [m.right - b.right, m.bottom - b.bottom],
+      }[expected].map(Math.round);
+      expectEqual(insets, [8, 8], `the badge's distance from the two edges of its corner (${expected})`);
+      el._setLive(false);
+    };
+    await corner({}, "bottom_right");
+    await corner({ live_position: "top_left" }, "top_left");
   });
 
   test("map: on a narrow card the controls row stays inside the card", () => hasFeaturesList(), async () => {
@@ -285,6 +301,16 @@
       const right = child.getBoundingClientRect().right;
       expect(right <= edge + 0.5, `${child.className || child.tagName} ends at ${right}, past the row's edge at ${edge}`);
     }
+  });
+
+  test("stats: the figures above the map are spaced evenly when they fit", () => hasFeaturesList(), async () => {
+    clearStage();
+    const el = mountReplay({ header: { distance: false } });
+    await until(() => el._session && el.shadowRoot.querySelectorAll(".stats span").length === 2, "the two figures");
+    const row = el.shadowRoot.querySelector(".stats").getBoundingClientRect();
+    const [one, two] = [...el.shadowRoot.querySelectorAll(".stats span")].map((s) => s.getBoundingClientRect());
+    const gaps = [one.left - row.left, two.left - one.right, row.right - two.right].map(Math.round);
+    expect(Math.max(...gaps) - Math.min(...gaps) <= 2, `uneven spacing: ${gaps}`);
   });
 
   test("speed: the button on the map remembers its choice for the next time", hasReplay, async () => {
