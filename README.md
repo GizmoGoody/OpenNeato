@@ -188,6 +188,7 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
         distance: true
         duration: true
         battery: true
+        hide_labels: true
       autoplay: false
       units: auto
       height: 360
@@ -223,7 +224,7 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
 
   | Replay map option | What it does |
   |---|---|
-  | `header` | The row above the map: the session `selector` (when hidden, the map shows the latest run and follows a clean as it starts), and the session's `distance`, `duration` and `battery`. |
+  | `header` | The row above the map: the session `selector` (when hidden, the map shows the latest run and follows a clean as it starts), and the session's `distance`, `duration` and `battery`; `hide_labels` shows those figures without their names, which show on hover. |
   | `autoplay` | Play from the beginning as soon as a session loads. A session that is still recording is followed live instead. |
   | `units` | `auto` follows the Home Assistant unit system; `metric` or `imperial` overrides it. |
   | `height` | Map height in px. |
