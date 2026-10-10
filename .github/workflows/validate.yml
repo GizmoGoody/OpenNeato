@@ -93,7 +93,20 @@ jobs:
         with:
           node-version: "22"
       - name: Install test dependencies
-        run: pip install pytest-homeassistant-custom-component
+        run: |
+          pip install pytest-homeassistant-custom-component
+          # The tests serve Home Assistant's real frontend: install what the
+          # installed version of that component needs
+          python - <<'EOF' > frontend-requirements.txt
+          import json
+          from pathlib import Path
+          import homeassistant.components
+          manifest = Path(homeassistant.components.__file__).parent / "frontend" / "manifest.json"
+          print("
+".join(json.loads(manifest.read_text()).get("requirements", [])))
+          EOF
+          cat frontend-requirements.txt
+          pip install -r frontend-requirements.txt
       - name: Run the card UI tests
         env:
           OPENNEATO_UI_TESTS: "1"
