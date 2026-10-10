@@ -1346,8 +1346,11 @@ class OpenNeatoReplayCard extends HTMLElement {
     _setPickerOpen(open) {
         if (open === this._pickerOpen) return;
         this._pickerOpen = open;
-        if (open) this._picker.style.width = `${this._picker.offsetWidth}px`;
-        else this._picker.style.width = "";
+        // Held at the width it has now: the row is full, so without this the picker
+        // would also shrink back to fit once the text is longer
+        const hold = open ? `${this._picker.getBoundingClientRect().width}px` : "";
+        this._picker.style.width = hold;
+        this._picker.style.flexShrink = open ? "0" : "";
         this._applyPickerText();
     }
 
