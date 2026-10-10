@@ -49,6 +49,7 @@ const MAX_FRAME_DT = 1 / 15;
 // second. 1 is true real time; a full house clean runs close to an hour, so
 // the useful range goes well past it.
 const SPEED_STEPS = [1, 2, 4, 8, 16, 32, 64];
+const SPEED_STORAGE_KEY = "openneato-replay-card:speed";
 // World grid the viewport snaps to. One metre swallows the usual half-metre
 // of drift in where a cleaning run ends up reaching, without wasting much of
 // the canvas on margin.
@@ -381,7 +382,7 @@ class OpenNeatoReplay extends HTMLElement {
 
     setConfig(config) {
         this._config = { ...DEFAULTS, ...config };
-        this._speed = Number(this._config.speed) > 0 ? Number(this._config.speed) : DEFAULTS.speed;
+        this._speed = this._storedSpeed();
         this._selectedName =
             this._config.session && this._config.session !== "latest" ? this._config.session : null;
         const master = this._config.grid ?? DEFAULTS.grid;
@@ -1462,9 +1463,26 @@ class OpenNeatoReplay extends HTMLElement {
     // Step to the next rate, wrapping around. A configured speed that isn't
     // one of the presets still works — the cycle picks up from the nearest
     // step above it.
+    // The speed picked with the button on the map is remembered in this browser,
+    // so it is not an option of the card
+    _storedSpeed() {
+        try {
+            const value = Number(window.localStorage.getItem(SPEED_STORAGE_KEY));
+            if (SPEED_STEPS.includes(value)) return value;
+        } catch (err) {
+            // Storage can be unavailable (private windows); the default stands
+        }
+        return DEFAULTS.speed;
+    }
+
     _cycleSpeed() {
         const next = SPEED_STEPS.find((s) => s > this._speed);
         this._speed = next === undefined ? SPEED_STEPS[0] : next;
+        try {
+            window.localStorage.setItem(SPEED_STORAGE_KEY, String(this._speed));
+        } catch (err) {
+            // Storage can be unavailable (private windows); the speed still changes
+        }
         this._showSpeed();
     }
 
@@ -2863,7 +2881,7 @@ class OpenNeatoConfiguration extends OpenNeatoFeature {
 // The options that belong to the replay (the tile feature of the same name)
 const REPLAY_KEYS = [
     "session", "entry_id", "rotation", "floorplan", "floorplan_opacity", "grid", "grid_lines", "tiled_plan",
-    "tiled_coverage", "trail", "fit", "units", "height", "speed", "autoplay", "show_picker", "show_distance",
+    "tiled_coverage", "trail", "fit", "units", "height", "autoplay", "show_picker", "show_distance",
     "show_duration", "show_battery", "show_stats",
 ];
 // The options that belong to the tile card on top. tap_action is the card's own.
@@ -3069,7 +3087,6 @@ const EDITOR_LABELS = {
     grid: "Neato-app look (grid lines and tiles)",
     trail: "Fading track behind the robot",
     autoplay: "Play automatically",
-    speed: "Starting playback speed",
     controls: "Controls",
     configuration: "Settings",
 };
@@ -3079,7 +3096,6 @@ const EDITOR_HELPERS = {
     state_content: "What the tile shows under the name: the robot's state and any of its sensors.",
     expanded: "Show the map and controls when the page loads, until you choose in this browser. A tap on the tile shows or hides them.",
     show_picker: "Hidden, the map shows the latest run, and follows a clean as it starts.",
-    speed: "Session seconds per real second when the card loads. The button on the map changes it only until the page reloads.",
     controls: "Buttons under the map, in this order.",
     configuration: "The robot's switches and choices, in this order.",
 };
@@ -3114,7 +3130,6 @@ const REPLAY_FIELDS = [
     toggle("grid"),
     toggle("trail"),
     toggle("autoplay"),
-    { name: "speed", selector: { number: { min: 1, max: 64, step: 1, mode: "box" } } },
 ];
 
 const sortable = (name, options) => ({ name, selector: { select: { multiple: true, reorder: true, options } } });
