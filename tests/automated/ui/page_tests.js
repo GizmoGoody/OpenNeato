@@ -230,6 +230,22 @@
     expect(!el.shadowRoot.querySelector("button.del"), "the separate delete button is still there");
   });
 
+  test("menu: the button follows the theme's feature corners and height, as Home Assistant's select menu does", () => hasMenu() && source().includes("--menu-fill"), async () => {
+    clearStage();
+    stage().style.setProperty("--feature-border-radius", "21px");
+    stage().style.setProperty("--feature-height", "40px");
+    try {
+      const el = mountReplay();
+      await readyPicker(el);
+      const style = getComputedStyle(picker(el));
+      expectEqual(style.borderTopLeftRadius, "21px", "the corners");
+      expectEqual(style.height, "40px", "the height");
+    } finally {
+      stage().style.removeProperty("--feature-border-radius");
+      stage().style.removeProperty("--feature-height");
+    }
+  });
+
   test("menu: choosing a line shows that session, and the button its date", hasMenu, async () => {
     clearStage();
     const el = mountReplay();
