@@ -181,6 +181,7 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
   icon_double_tap_action:
     action: none
   expanded: false
+  show_chevron: false
   features:
     - type: custom:openneato-replay
       header:
@@ -224,14 +225,15 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
   The options above `expanded` are the tile card's (there is no `tap_action`: a tap shows or hides
   the features). `state_content` takes `state` and any sensor of the robot by its key, such as
   `charging`, `battery`, `wifi_signal`, `uptime`, `last_clean_area` and `error_message` (the robot's own message, such as asking for the dust bin to be emptied). A sensor with nothing to show is left out of the line. `expanded`
-  shows the features when the page loads, until the person has chosen in this browser. The card is
-  full width unless its layout says otherwise.
+  shows the features when the page loads, until the person has chosen in this browser. `show_chevron`
+  adds an arrow at the top right that also shows or hides them. The card is full width unless its
+  layout says otherwise.
 
   Each feature is optional, and each also works in any tile card for the robot.
 
   | Replay map option | What it does |
   |---|---|
-  | `header` | The row above the map: the session `selector` (when hidden, the map shows the latest run and follows a clean as it starts), and the session's `area`, `distance`, `duration` and `battery`, live and after the clean; `hide_labels` shows those figures without their names, which show on hover. |
+  | `header` | The row above the map: the session `selector` (when hidden, the map shows the latest run and follows a clean as it starts), and the session's `area`, `distance`, `duration` and `battery`, live and after the clean; `hide_labels` shows those figures without their names, which show on hover. Each finished session in the selector has its own delete button (or press Delete on it). When the row cannot fit everything, the battery shows what the clean used, such as Δ12%. |
   | `autoplay` | Play from the beginning as soon as a session loads. A session that is still recording is followed live instead. |
   | `units` | `auto` follows the Home Assistant unit system; `metric` or `us_customary` overrides it. |
   | `height` | Map height in px. |
