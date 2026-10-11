@@ -251,10 +251,12 @@
     await until(() => el._session, "the session to load");
     const shown = el._selectedName;
     const deleted = [];
-    const real = el._hass;
-    el._hass = Object.assign(Object.create(real), {
-      callWS: (msg) => (msg.type === "openneato/delete_session" ? (deleted.push(msg.name), Promise.resolve({})) : real.callWS(msg)),
-    });
+    // Caught at the connection: the card is handed a new hass on every update
+    const conn = hass().connection;
+    const send = conn.sendMessagePromise;
+    conn.sendMessagePromise = (msg) => (msg.type === "openneato/delete_session"
+      ? (deleted.push(msg.name), Promise.resolve({}))
+      : send.call(conn, msg));
     const confirm = window.confirm;
     const asked = [];
     window.confirm = (text) => (asked.push(text), true);
@@ -274,7 +276,7 @@
       expectEqual(deleted[1], item.value, "the session deleted by key");
     } finally {
       window.confirm = confirm;
-      el._hass = real;
+      conn.sendMessagePromise = send;
       el._menu.open = false;
     }
   });
@@ -292,17 +294,18 @@
 
   test("stats: when the row cannot fit, the battery shows what the clean used", () => hasReplay() && source().includes("_batteryNow"), async () => {
     clearStage();
-    const wide = mountReplay({ header: { hide_labels: false } });
-    await until(() => wide._session && statsText(wide).includes("Battery"), "the session to load");
+    const wide = mountReplay();
+    await until(() => wide._session && statsText(wide).includes("%"), "the session to load");
     expect(statsText(wide).includes("90% → 84%"), `the whole battery figure: ${statsText(wide)}`);
     clearStage();
     const box = document.createElement("div");
-    box.style.width = "300px";
+    box.style.width = "260px";
     stage().append(box);
-    const narrow = mountReplay({ header: { hide_labels: false } }, box);
-    await until(() => narrow._session && statsText(narrow).includes("Battery"), "the session to load");
+    const narrow = mountReplay({}, box);
+    await until(() => narrow._session && statsText(narrow).includes("%"), "the session to load");
     await until(() => statsText(narrow).includes("Δ6%"), `the battery used, not ${statsText(narrow)}`);
     expect(!statsText(narrow).includes("→"), "both ends are still shown");
+    expect(narrow.shadowRoot.querySelector('.stats span[title="Battery used"]'), "no name on hover for the battery used");
     // Live, from the level at the start to the battery sensor's level now (85%)
     narrow._setLive(true);
     narrow._renderStats();
