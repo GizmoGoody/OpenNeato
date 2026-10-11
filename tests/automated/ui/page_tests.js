@@ -132,19 +132,26 @@
     return el;
   }
   const picker = (el) => el.shadowRoot.querySelector(".picker");
-  const optionTexts = (el) => [...picker(el).options].map((o) => o.textContent);
-  const readyPicker = (el) => until(() => picker(el).options.length === 3 && picker(el), "the session list");
+  // The session menu (Home Assistant's dropdown), or a <select> on older branches
+  const hasMenu = () => source().includes("_pickerItem");
+  const menuItems = (el) => [...el.shadowRoot.querySelectorAll("ha-dropdown.sessions ha-dropdown-item")];
+  const optionTexts = (el) => (hasMenu()
+    ? menuItems(el).map((i) => i.textContent.trim())
+    : [...picker(el).options].map((o) => o.textContent));
+  const sessionNames = (el) => (hasMenu() ? menuItems(el).map((i) => i.value) : [...(picker(el)?.options ?? [])].map((o) => o.value));
+  const shownDate = (el) => (hasMenu() ? picker(el).querySelector(".text").textContent : picker(el).selectedOptions[0].textContent);
+  const readyPicker = (el) => until(() => sessionNames(el).length === 3 && picker(el), "the session list");
   const statsText = (el) => el.shadowRoot.querySelector(".stats").textContent;
   // The figures' names: in the text when they show, in the hover title when hidden
   const statsNames = (el) => [...el.shadowRoot.querySelectorAll(".stats span")].map((s) => s.title || s.textContent).join(" ");
 
-  test("picker: closed, it shows only the date of the session on screen", hasDateLabel, async () => {
+  test("picker: closed, it shows only the date of the session on screen", () => hasDateLabel() && !hasMenu(), async () => {
     clearStage();
     const el = mountReplay();
     await readyPicker(el);
     const texts = optionTexts(el);
     for (const text of texts) expect(!text.includes("—"), `closed option still has the full line: ${text}`);
-    const real = Number(picker(el).options[0].value.split(".")[0]);
+    const real = Number(sessionNames(el)[0].split(".")[0]);
     expectEqual(texts[0], dateOf(real), "the real session's date");
     expectEqual(picker(el).selectedOptions[0].textContent, dateOf(real), "the shown date");
   });
@@ -153,10 +160,11 @@
     clearStage();
     const el = mountReplay();
     await readyPicker(el);
-    expectEqual(optionTexts(el).slice(1), ["Date unknown", "Date unknown"], "the unset sessions");
+    const unset = optionTexts(el).slice(1).map((t) => (hasMenu() ? t.split(" — ")[0] : t));
+    expectEqual(unset, ["Date unknown", "Date unknown"], "the unset sessions");
   });
 
-  test("picker: open, every session shows its full line", hasDateLabel, async () => {
+  test("picker: open, every session shows its full line", () => hasDateLabel() && !hasMenu(), async () => {
     clearStage();
     const el = mountReplay();
     await readyPicker(el);
@@ -169,7 +177,7 @@
     expect(texts[1].startsWith("Date unknown —"), `unset line: ${texts[1]}`);
   });
 
-  test("picker: the header does not move when the list opens", hasDateLabel, async () => {
+  test("picker: the header does not move when the list opens", () => hasDateLabel() && !hasMenu(), async () => {
     clearStage();
     const el = mountReplay();
     await readyPicker(el);
@@ -182,19 +190,19 @@
     expect(Math.abs(after - closed) < 1, `width ${closed} before, ${after} after`);
   });
 
-  test("picker: choosing a session closes the list and shows only its date", hasDateLabel, async () => {
+  test("picker: choosing a session closes the list and shows only its date", () => hasDateLabel() && !hasMenu(), async () => {
     clearStage();
     const el = mountReplay();
     await readyPicker(el);
     picker(el).dispatchEvent(new Event("pointerdown", { bubbles: true }));
-    picker(el).value = picker(el).options[2].value;
+    picker(el).value = sessionNames(el)[2];
     picker(el).dispatchEvent(new Event("change", { bubbles: true }));
     expectEqual(optionTexts(el).slice(1), ["Date unknown", "Date unknown"], "closed again");
     await until(() => statsNames(el).includes("Duration"), "the chosen session to load");
     expectEqual(picker(el).selectedOptions[0].textContent, "Date unknown", "the chosen session");
   });
 
-  test("picker: losing focus closes the list, Escape too", hasDateLabel, async () => {
+  test("picker: losing focus closes the list, Escape too", () => hasDateLabel() && !hasMenu(), async () => {
     clearStage();
     const el = mountReplay();
     await readyPicker(el);
@@ -205,6 +213,104 @@
       close();
       expect(optionTexts(el).every((t) => !t.includes("—")), "did not close");
     }
+  });
+
+  test("menu: the button shows the date of the session on screen, each line the full session", hasMenu, async () => {
+    clearStage();
+    const el = mountReplay();
+    await readyPicker(el);
+    const real = Number(sessionNames(el)[0].split(".")[0]);
+    expectEqual(shownDate(el), dateOf(real), "the shown date");
+    const texts = optionTexts(el);
+    expect(texts.every((t) => t.includes("—")), `not all full lines: ${JSON.stringify(texts)}`);
+    expect(texts[0].includes("House Clean") && /ft²|m²/.test(texts[0]), `the first line: ${texts[0]}`);
+    expect(texts[2].includes("Spot Clean"), `the last line: ${texts[2]}`);
+    expect(menuItems(el)[0].selected && !menuItems(el)[1].selected, "the session on screen is not the one marked");
+    expect(!el.shadowRoot.querySelector("button.del"), "the separate delete button is still there");
+  });
+
+  test("menu: choosing a line shows that session, and the button its date", hasMenu, async () => {
+    clearStage();
+    const el = mountReplay();
+    await readyPicker(el);
+    const width = picker(el).getBoundingClientRect().width;
+    el._menu.open = true;
+    await sleep(300);
+    expect(Math.abs(picker(el).getBoundingClientRect().width - width) < 1, "the header moved when the menu opened");
+    menuItems(el)[2].click();
+    await until(() => el._selectedName === sessionNames(el)[2], "the chosen session");
+    await until(() => !el._menu.open, "the menu to close");
+    expectEqual(shownDate(el), "Date unknown", "the shown date");
+    expect(menuItems(el)[2].selected, "the chosen line is not marked");
+  });
+
+  test("menu: each finished session has its own delete button, which deletes it without choosing it", hasMenu, async () => {
+    clearStage();
+    const el = mountReplay();
+    await readyPicker(el);
+    await until(() => el._session, "the session to load");
+    const shown = el._selectedName;
+    const deleted = [];
+    const real = el._hass;
+    el._hass = Object.assign(Object.create(real), {
+      callWS: (msg) => (msg.type === "openneato/delete_session" ? (deleted.push(msg.name), Promise.resolve({})) : real.callWS(msg)),
+    });
+    const confirm = window.confirm;
+    const asked = [];
+    window.confirm = (text) => (asked.push(text), true);
+    try {
+      el._menu.open = true;
+      await sleep(200);
+      const target = sessionNames(el)[2];
+      menuItems(el)[2].querySelector("ha-icon-button").click();
+      await until(() => deleted.length === 1, "the delete call");
+      expectEqual(deleted, [target], "the session deleted");
+      expect(asked[0].includes("Spot Clean"), `the confirmation does not name the session: ${asked[0]}`);
+      expectEqual(el._selectedName, shown, "the session on screen");
+      // The Delete key deletes the line in focus
+      const item = menuItems(el)[1];
+      item.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true, composed: true }));
+      await until(() => deleted.length === 2, "the second delete call");
+      expectEqual(deleted[1], item.value, "the session deleted by key");
+    } finally {
+      window.confirm = confirm;
+      el._hass = real;
+      el._menu.open = false;
+    }
+  });
+
+  test("menu: a session still recording has no delete button", hasMenu, async () => {
+    clearStage();
+    const el = mountReplay();
+    await readyPicker(el);
+    el._sessions = el._sessions.map((s, i) => (i === 0 ? { ...s, recording: true } : s));
+    el._renderPicker();
+    const [live, done] = menuItems(el);
+    expect(!live.querySelector("ha-icon-button"), "the recording session can be deleted");
+    expect(done.querySelector("ha-icon-button"), "a finished session cannot be deleted");
+  });
+
+  test("stats: when the row cannot fit, the battery shows what the clean used", () => hasReplay() && source().includes("_batteryNow"), async () => {
+    clearStage();
+    const wide = mountReplay({ header: { hide_labels: false } });
+    await until(() => wide._session && statsText(wide).includes("Battery"), "the session to load");
+    expect(statsText(wide).includes("90% → 84%"), `the whole battery figure: ${statsText(wide)}`);
+    clearStage();
+    const box = document.createElement("div");
+    box.style.width = "300px";
+    stage().append(box);
+    const narrow = mountReplay({ header: { hide_labels: false } }, box);
+    await until(() => narrow._session && statsText(narrow).includes("Battery"), "the session to load");
+    await until(() => statsText(narrow).includes("Δ6%"), `the battery used, not ${statsText(narrow)}`);
+    expect(!statsText(narrow).includes("→"), "both ends are still shown");
+    // Live, from the level at the start to the battery sensor's level now (85%)
+    narrow._setLive(true);
+    narrow._renderStats();
+    expect(statsText(narrow).includes("Δ5%"), `the battery used so far: ${statsText(narrow)}`);
+    narrow._setLive(false);
+    // Wider again, the whole figure comes back
+    box.style.width = "560px";
+    await until(() => statsText(narrow).includes("90% → 84%"), "the whole battery figure again");
   });
 
   test("stats: with the picker hidden, an unset clock still says Date unknown", hasDateLabel, async () => {
@@ -220,7 +326,7 @@
     clearStage();
     const el = mountReplay({ header: { selector: false } });
     await readyPicker(el);
-    const newest = Number(picker(el).options[0].value.split(".")[0]);
+    const newest = Number(sessionNames(el)[0].split(".")[0]);
     await until(() => statsText(el).includes(dateOf(newest)), "the newest run's date");
     expect(statsText(el).includes("House Clean"), `the mode is missing: ${statsText(el)}`);
   });
@@ -402,19 +508,19 @@
     clearStage();
     const el = mountReplay();
     await readyPicker(el);
-    const newest = picker(el).options[0].value;
+    const newest = sessionNames(el)[0];
     await until(() => el._selectedName === newest && el._session, "the newest clean");
     // Left on an older clean without a pick by hand (as when the clean it
     // followed was renamed), the next list refresh goes back to the newest
-    el._selectedName = picker(el).options[2].value;
+    el._selectedName = sessionNames(el)[2];
     el._userPicked = false;
     await el._reconcileSelection();
     expectEqual(el._selectedName, newest, "the clean shown");
     // Picked by hand, it stays
     el._userPicked = true;
-    await el._selectSession(picker(el).options[2].value);
+    await el._selectSession(sessionNames(el)[2]);
     await el._reconcileSelection();
-    expectEqual(el._selectedName, picker(el).options[2].value, "the clean picked by hand");
+    expectEqual(el._selectedName, sessionNames(el)[2], "the clean picked by hand");
   });
 
   test("speed: the button on the map remembers its choice for the next time", hasReplay, async () => {
@@ -530,7 +636,7 @@
     await tileReady(el);
     await press(tileInfo(el));
     const replay = await until(() => replayIn(el), "the replay to appear");
-    await until(() => replay.shadowRoot.querySelector(".picker")?.options.length === 3, "the session list");
+    await until(() => sessionNames(replay).length === 3, "the session list");
     expect(openneatoCalls() > before, "no calls to the integration after opening");
     expectEqual(chevron(el).getAttribute("aria-expanded"), "true", "aria-expanded");
     await until(() => statsNames(replay).includes("Duration"), "the session to load");
@@ -545,7 +651,7 @@
     const el = mountCard({ entity: VACUUM, features: [REPLAY] });
     await tileReady(el);
     await press(tileInfo(el));
-    await until(() => replayIn(el)?.shadowRoot.querySelector(".picker")?.options.length === 3, "the replay");
+    await until(() => replayIn(el) && sessionNames(replayIn(el)).length === 3, "the replay");
     await press(tileInfo(el));
     await until(() => !replayIn(el), "the replay to go");
     const calls = openneatoCalls();
@@ -582,10 +688,22 @@
     }
   });
 
+  test("card: the arrow is hidden unless asked for", () => hasCard() && source().includes("show_chevron"), async () => {
+    clearStage();
+    forgetOpenState();
+    const plain = mountCard({ entity: VACUUM, features: [REPLAY] });
+    await tileReady(plain);
+    expect(!visible(chevron(plain)), "the arrow shows by default");
+    const asked = mountCard({ entity: VACUUM, show_chevron: true, features: [REPLAY] });
+    await tileReady(asked);
+    expect(visible(chevron(asked)), "the arrow is hidden when asked for");
+    expectEqual(Object.keys(asked._tile?._config ?? {}).includes("show_chevron"), false, "the tile card was given the option");
+  });
+
   test("card: the arrow opens and closes it too, and says which", hasCard, async () => {
     clearStage();
     forgetOpenState();
-    const el = mountCard({ entity: VACUUM, features: [REPLAY] });
+    const el = mountCard({ entity: VACUUM, show_chevron: true, features: [REPLAY] });
     await tileReady(el);
     await press(chevron(el));
     await until(() => replayIn(el), "the replay to appear");
@@ -783,12 +901,19 @@
     clearStage();
     const { el, saved, own } = await cardEditor(cardConfig);
     expectEqual(el.shadowRoot.querySelector('[slot="header"]').textContent.trim(), "OpenNeato", "the panel");
-    expectEqual(names(own.schema), ["expanded"], "the card's own options");
+    const arrow = source().includes("show_chevron");
+    expectEqual(names(own.schema), arrow ? ["expanded", "show_chevron"] : ["expanded"], "the card's own options");
     expectEqual(own.computeLabel(own.schema[0]), "Expanded on load", "the label");
+    const off = arrow ? { show_chevron: false } : {};
     own.dispatchEvent(new CustomEvent("value-changed", { detail: { value: { expanded: true } } }));
-    expectEqual(last(saved), { ...cardConfig, expanded: true }, "on");
+    expectEqual(last(saved), { ...cardConfig, expanded: true, ...off }, "on");
     own.dispatchEvent(new CustomEvent("value-changed", { detail: { value: { expanded: false } } }));
-    expectEqual(last(saved), { ...cardConfig, expanded: false }, "off, and kept");
+    expectEqual(last(saved), { ...cardConfig, expanded: false, ...off }, "off, and kept");
+    if (arrow) {
+      expectEqual(own.computeLabel(own.schema[1]), "Expand arrow", "the arrow's label");
+      own.dispatchEvent(new CustomEvent("value-changed", { detail: { value: { expanded: false, show_chevron: true } } }));
+      expectEqual(last(saved), { ...cardConfig, expanded: false, show_chevron: true }, "the arrow on");
+    }
   });
 
   test("card editor: a change in the tile card's editor keeps Expanded on load", hasFeaturesList, async () => {
