@@ -13,7 +13,7 @@ from __future__ import annotations
 import importlib
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -45,6 +45,7 @@ class FakeRunner:
     def __init__(self) -> None:
         self.merged: tuple[int, int, int] | None = None
         self.live: tuple[int, int, int] | None = None
+        self.nearest: tuple[int, int, int] | None = None
 
     def alignment(self, name: str) -> tuple[int, int, int] | None:
         return self.merged
@@ -54,6 +55,9 @@ class FakeRunner:
 
     def live_alignment_source(self, name: str) -> str:
         return "live" if self.live else "none"
+
+    def nearest_alignment(self, name: str) -> tuple[int, int, int] | None:
+        return self.nearest
 
 
 class FakeConnection:
@@ -237,3 +241,47 @@ async def test_the_session_says_which_alignment_it_is_drawn_with(hass: HomeAssis
     with patch.object(websocket, "build_replay_session", _fake_build(built)):
         await _get_session(hass, connection)
     assert connection.results[-1]["alignment_source"] == "live"
+
+
+
+def test_a_clean_without_an_alignment_uses_the_nearest_earlier_cleans(hass: HomeAssistant) -> None:
+    """A clean too short to merge is drawn as the clean before it was, not raw."""
+    if not hasattr(lidar_runner.LidarMapRunner, "nearest_alignment"):
+        pytest.skip("This branch has no nearest-clean fallback")
+    runner = lidar_runner.LidarMapRunner(hass, "entry", None, SimpleNamespace(async_add_listener=lambda *_: None))
+    runner._map = lidar_mapper.AccumulatedMap({})
+    runner._map.alignments.update({
+        "99.jsonl": [0, 0, 0], "1791667002.jsonl": [1, -1, 6], "1791669270.jsonl": [1, -6, -3],
+    })
+    assert runner.nearest_alignment("1791675925.jsonl.hs") == (1, -6, -3)
+    assert runner.nearest_alignment("1791668000.jsonl.hs") == (1, -1, 6)
+
+
+async def test_an_unmerged_cleans_stand_in_is_saved(hass: HomeAssistant) -> None:
+    """Too short to merge: its stand-in alignment is saved, so a restart keeps it."""
+    if not hasattr(lidar_runner.LidarMapRunner, "_save_stand_in"):
+        pytest.skip("This branch does not save stand-ins")
+    runner = lidar_runner.LidarMapRunner(hass, "entry", None, SimpleNamespace(async_add_listener=lambda *_: None))
+    runner._map = lidar_mapper.AccumulatedMap({})
+    runner._map.walls = dict(ROOM)
+    runner._store = SimpleNamespace(async_save=AsyncMock())
+    runner._collecting = True
+    runner._session_name = NAME
+    runner._live_align = (1, 3, 2)
+    runner._captures = []
+    await runner._finish()
+    runner._store.async_save.assert_awaited_once()
+    assert runner._store.async_save.await_args.args[0]["alignments"][NAME] == (1, 3, 2)
+
+
+async def test_a_finished_unmerged_clean_is_served_with_the_nearest_alignment(hass: HomeAssistant) -> None:
+    if "nearest_alignment" not in open(websocket.__file__, encoding="utf-8").read():
+        pytest.skip("This branch has no nearest-clean fallback")
+    runner, built = _set_up(hass, recording=False)
+    runner.nearest = (1, -6, -3)
+    connection = FakeConnection()
+    with patch.object(websocket, "build_replay_session", _fake_build(built)):
+        await _get_session(hass, connection)
+        await _get_session(hass, connection)
+    assert built == [(1, -6, -3)], "parsed once with the nearest clean's alignment, then cached"
+    assert connection.results[-1]["alignment_source"] == "previous"
