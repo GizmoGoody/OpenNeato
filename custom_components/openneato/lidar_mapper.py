@@ -88,6 +88,9 @@ MAX_GRID_CELLS = 200_000
 # only 35%. Anything below this is far more likely to be a bad fit than a
 # genuine discovery, and merging it would corrupt the accumulated map.
 MERGE_MIN_OVERLAP = 0.55
+# A fit near the last clean's alignment is kept unless another fits better
+# than this (see best_alignment).
+PREFER_NEAR_MARGIN = 0.05
 
 
 # ── geometry ────────────────────────────────────────────────────────
@@ -142,13 +145,25 @@ def _rotate_cells(cells: Iterable[tuple[int, int]], quarter: int) -> list[tuple[
     return [(cy, -cx) for cx, cy in cells]
 
 
+def run_key(name: str) -> str:
+    """A clean's key: its file name without .jsonl or .hs.
+
+    The bridge records a clean as <start>.jsonl and, once it ends, compresses
+    it to <start>.jsonl.hs, so the same clean goes by both names.
+    """
+    for suffix in (".hs", ".jsonl"):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+    return name
+
+
 def align_near(
     new_walls: dict[tuple[int, int], int],
     ref_walls: dict[tuple[int, int], int],
     guess: tuple[int, int, int],
     search_cells: int = 12,
 ) -> tuple[int, int, int, float]:
-    """Fit a new session's walls onto the map close to a known alignment.
+    """Fit a session's walls onto the map close to a known alignment.
 
     Only the guess's quarter turn, and shifts within search_cells of its
     shift. Returns (quarter, dx, dy, overlap), scored as align_to_reference
@@ -166,6 +181,28 @@ def align_near(
             score = hit / min(len(rotated), len(ref))
             if score > best[3]:
                 best = (quarter, dx, dy, score)
+    return best
+
+
+def best_alignment(
+    new_walls: dict[tuple[int, int], int],
+    ref_walls: dict[tuple[int, int], int],
+    guess: tuple[int, int, int] | None = None,
+) -> tuple[int, int, int, float]:
+    """Fit a session's walls onto the map, preferring a fit near the guess.
+
+    A few walls can match a small patch of the map almost anywhere, with an
+    overlap score that looks excellent: one clean's first scans fitted at 0
+    degrees and (17, 39) cells with 99% overlap, when the right fit was 90
+    degrees and (3, 2) cells. The robot's frame stays the same from clean to
+    clean, so a fit near the last clean's alignment wins unless another fits
+    clearly better.
+    """
+    best = align_to_reference(new_walls, ref_walls)
+    if guess is not None:
+        near = align_near(new_walls, ref_walls, guess)
+        if near[3] >= MERGE_MIN_OVERLAP and near[3] >= best[3] - PREFER_NEAR_MARGIN:
+            return near
     return best
 
 
@@ -373,19 +410,19 @@ class AccumulatedMap:
         # Quarter turn that puts the reference map the right way up, kept so
         # the orientation cannot flip between renders.
         self.quarter_lock: int = int(data.get("quarter_lock", 0))
-        # Correction applied to each merged session, keyed by its file name.
-        #
-        # A session arrives in whatever frame the robot's localisation happened
-        # to be in; align_to_reference() fits it onto the accumulated map
-        # before merging. That correction used to be computed, used and thrown
-        # away -- so the map held straightened walls while the card was still
-        # served the session's raw path and coverage. After a localisation
-        # loss the two came out a quarter turn apart, which is exactly what a
-        # user sees as "the cleaned area does not line up with the walls".
-        # Keeping it lets the replay be served in the same frame as the map.
-        self.alignments: dict[str, tuple[int, int, int]] = {
-            k: tuple(v) for k, v in (data.get("alignments") or {}).items()
-        }
+        # Each clean's alignment onto the map, keyed by run_key(), so the
+        # replay is drawn in the map's frame and not the robot's frame of the
+        # day (a quarter turn round, or shifted, after the robot re-zeroes).
+        #   merged  the clean was merged into the map with this alignment
+        #   fitted  the clean was not merged; this is its own fit from its scans
+        # Stored oldest first. Earlier versions stored a bare [q, dx, dy]
+        # under the file name; those were all merged.
+        self.alignments: dict[str, dict[str, Any]] = {}
+        for name, value in (data.get("alignments") or {}).items():
+            if isinstance(value, dict):
+                self.alignments[run_key(name)] = {"align": tuple(value["align"]), "kind": value["kind"]}
+            else:
+                self.alignments[run_key(name)] = {"align": tuple(value), "kind": "merged"}
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -393,20 +430,45 @@ class AccumulatedMap:
             "floor": [f"{cx},{cy}" for cx, cy in self.floor],
             "sessions": self.sessions,
             "quarter_lock": self.quarter_lock,
-            "alignments": {k: list(v) for k, v in self.alignments.items()},
+            "alignments": {
+                k: {"align": list(v["align"]), "kind": v["kind"]} for k, v in self.alignments.items()
+            },
         }
+
+    def record(self, session_name: str, align: tuple[int, int, int], kind: str) -> None:
+        """Store a clean's alignment; the newest record goes last."""
+        key = run_key(session_name)
+        self.alignments.pop(key, None)
+        self.alignments[key] = {"align": tuple(align), "kind": kind}
+
+    def alignment_of(self, session_name: str) -> tuple[tuple[int, int, int], str] | None:
+        """A clean's own alignment and its kind, if it has one."""
+        found = self.alignments.get(run_key(session_name))
+        return (found["align"], found["kind"]) if found else None
+
+    def latest_merged(self) -> tuple[int, int, int] | None:
+        """The alignment of the clean most recently merged into the map."""
+        for record in reversed(self.alignments.values()):
+            if record["kind"] == "merged":
+                return record["align"]
+        return None
 
     def merge_session(
         self,
         walls: dict[tuple[int, int], int],
         floor: set[tuple[int, int]],
         session_name: str | None = None,
+        guess: tuple[int, int, int] | None = None,
     ) -> dict[str, Any]:
-        """Fold one cleaning into the accumulated map, re-aligning it first."""
+        """Fold one cleaning into the accumulated map, re-aligning it first.
+
+        guess is the last merged clean's alignment, which a fit near it is
+        preferred to (see best_alignment).
+        """
         report: dict[str, Any] = {"session_walls": len(walls), "realigned": False}
 
         if self.walls:
-            quarter, dx, dy, overlap = align_to_reference(walls, self.walls)
+            quarter, dx, dy, overlap = best_alignment(walls, self.walls, guess)
             report.update(quarter=quarter, dx=dx, dy=dy, overlap=round(overlap, 3))
             if overlap < MERGE_MIN_OVERLAP:
                 # Nothing lines up. Rather than corrupt a good map with a bad
@@ -433,7 +495,7 @@ class AccumulatedMap:
             }
 
         if session_name:
-            self.alignments[session_name] = (quarter, dx, dy) if self.walls else (0, 0, 0)
+            self.record(session_name, (quarter, dx, dy) if self.walls else (0, 0, 0), "merged")
 
         for cell, n in walls.items():
             self.walls[cell] = self.walls.get(cell, 0) + n

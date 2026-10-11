@@ -193,12 +193,12 @@ async def ws_get_session(
     cache: dict[tuple[str, str], dict[str, Any]] = domain_data.setdefault(CACHE_KEY, {})
     runner = data.get("mapper")
     cached = cache.get((entry_id, name))
-    # A run merged after it was cached (the card fetches the moment a clean ends,
-    # the map merges it a little later) was cached in the robot's frame: parse
-    # it again now that its alignment is known.
+    # A clean cached before it had its alignment (the card fetches the moment a
+    # clean ends; the map merges it a little later) is parsed again once the
+    # alignment it would be drawn with has changed.
     if cached is not None and runner is not None:
-        known = runner.alignment(name) or runner.nearest_alignment(name)
-        if list(known or ()) != list(cached.get("alignment") or ()):
+        align_now, _source = runner.resolve(name)
+        if list(align_now or ()) != list(cached.get("alignment") or ()):
             cache.pop((entry_id, name), None)
             cached = None
     if cached is not None:
@@ -228,17 +228,8 @@ async def ws_get_session(
         connection.send_error(msg["id"], "fetch_failed", str(err))
         return
 
-    # Serve the run in the map's frame, not the robot's frame of the day. A run
-    # still recording has not been merged, so it gets its fit so far.
-    align = runner.alignment(name) if runner is not None else None
-    source = "merged" if align is not None else "none"
-    if align is None and runner is not None and was_recording:
-        align = await runner.async_live_alignment(name)
-        source = runner.live_alignment_source(name)
-    elif align is None and runner is not None:
-        # A finished clean that was never merged: the nearest earlier clean's
-        align = runner.nearest_alignment(name)
-        source = "previous" if align is not None else "none"
+    # Serve the run in the map's frame, not the robot's frame of the day
+    align, source = runner.resolve(name, was_recording) if runner is not None else (None, "none")
 
     # Coverage-grid construction is CPU-bound; keep it off the event loop.
     try:
@@ -254,8 +245,7 @@ async def ws_get_session(
         connection.send_error(msg["id"], "empty_session", "Session contains no pose data")
         return
     # Which alignment the run is drawn with, so the card can say while a live
-    # clean is still settling: merged, live (its own fit), previous (the last
-    # clean's, until its own is ready) or none
+    # clean is still settling (see LidarMapRunner.resolve)
     parsed["alignment_source"] = source
 
     # Evaluated now rather than before the fetch: the session may have

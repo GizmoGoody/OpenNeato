@@ -29,8 +29,8 @@ from .lidar_mapper import (
     MERGE_MIN_OVERLAP,
     plan_calibration,
     AccumulatedMap,
-    align_near,
-    align_to_reference,
+    best_alignment,
+    run_key,
     build_session_grids,
     parse_pose,
     render_plan,
@@ -51,15 +51,11 @@ MIN_ROTATION_FRACTION = 0.6
 MAX_MOVE_DURING_SCAN_M = 0.12
 MAX_TURN_DURING_SCAN_DEG = 25.0
 MIN_CAPTURES = 60            # below this a run is too thin to be worth merging
-# While a run is recording it has not been merged yet, so its alignment onto the
-# map is worked out from its scans so far: once enough of them are in, and then
-# at most this often, since fitting is CPU-bound.
+# While a clean is recording it is fitted onto the map from its scans so far,
+# so the live replay is drawn in the map's frame: once enough of them are in,
+# and then at most this often, since fitting is CPU-bound.
 LIVE_ALIGN_MIN_CAPTURES = 20
 LIVE_ALIGN_EVERY = 60.0      # seconds
-# A clean's first few walls can match a small patch of the map almost anywhere,
-# with an overlap score that looks excellent. A fit near the last clean's
-# alignment is kept unless another fits better than this.
-LIVE_ALIGN_PREFER_MARGIN = 0.05
 BYTES_PER_POSE = 48          # firmware writes ~48 bytes per snapshot, every 2 s
 MAX_INTERVAL = 12.0
 
@@ -103,10 +99,13 @@ class LidarMapRunner:
         self._health_start = 0.0
         self._health_ref: dict[str, Any] | None = None
         self._session_name: str | None = None
-        self._live_align: tuple[int, int, int] | None = None
-        self._live_guess: tuple[int, int, int] | None = None
-        self._live_align_at = 0.0
-        self._live_align_busy = False
+        # The clean's own fit so far, and the starting guess until it has one
+        # (the last merged clean's alignment; the robot's frame stays the same
+        # from clean to clean)
+        self._fit: tuple[int, int, int] | None = None
+        self._guess: tuple[int, int, int] | None = None
+        self._fit_at = 0.0
+        self._fitting = False
         self.last_report: dict[str, Any] = {}
 
     async def async_load(self) -> None:
@@ -150,12 +149,9 @@ class LidarMapRunner:
         # frame as the map. Captured at the start because by the time the run
         # ends the robot has stopped reporting it as recording.
         self._session_name = (self._health_ref or {}).get("name")
-        self._live_align = None
-        self._live_align_at = 0.0
-        # Until this run has enough scans for a fit of its own, start from the
-        # last run's: the robot's frame stays the same from clean to clean
-        last = list(self._map.alignments.values())[-1] if self._map and self._map.alignments else None
-        self._live_guess = tuple(last) if last else None
+        self._fit = None
+        self._fit_at = 0.0
+        self._guess = self._map.latest_merged() if self._map else None
         self._start_timer()
         _LOGGER.info("LIDAR mapping: collection started")
 
@@ -231,6 +227,41 @@ class LidarMapRunner:
 
         if time.monotonic() - self._last_health >= HEALTH_EVERY:
             self._check_health()
+        if (
+            not self._fitting
+            and self._map is not None
+            and self._map.walls
+            and time.monotonic() - self._fit_at >= LIVE_ALIGN_EVERY
+        ):
+            self.hass.async_create_task(self._async_fit())
+
+    async def _async_fit(self) -> None:
+        """Fit the clean so far onto the map, for the live replay.
+
+        A clean is merged, and its alignment stored, only when it ends. Until
+        then this fit, kept only when it fits as well as a merge requires,
+        is what the live replay is drawn with.
+        """
+        captures = self._drop_slow_scans(list(self._captures))
+        if self._fitting or len(captures) < LIVE_ALIGN_MIN_CAPTURES or not self._map:
+            return
+        self._fitting = True
+        self._fit_at = time.monotonic()
+        try:
+            walls, _floor = await self.hass.async_add_executor_job(
+                build_session_grids, [c[:4] for c in captures]
+            )
+            quarter, dx, dy, overlap = await self.hass.async_add_executor_job(
+                best_alignment, walls, self._map.walls, self._guess
+            )
+        finally:
+            self._fitting = False
+        _LOGGER.debug(
+            "LIDAR mapping: live fit of %s is %d deg and (%d, %d) cells, %.0f%% overlap",
+            self._session_name, quarter * 90, dx, dy, 100 * overlap,
+        )
+        if overlap >= MERGE_MIN_OVERLAP and self._collecting:
+            self._fit = (quarter, dx, dy)
 
     def _recording_session(self) -> dict[str, Any] | None:
         for item in (self.coordinator.data or {}).get("history") or ():
@@ -285,19 +316,16 @@ class LidarMapRunner:
         self._collecting = False
         self._stop_timer()
         captures, self._captures = self._captures, []
-        # The card fetches the finished run straight away, before the merge below
-        # has stored its alignment: until it does, the live fit stands for it, so
-        # the run is not drawn in the robot's raw frame in that gap. The merge
-        # replaces it with its own.
-        stand_in = self._live_align or self._live_guess
-        if self._session_name and stand_in and self._map is not None:
-            self._map.alignments.setdefault(self._session_name, stand_in)
-        self._live_align = None
+        fit, self._fit = self._fit, None
+        # Until the merge below stores this clean's alignment (or if it is not
+        # merged at all), its own fit stands for it, saved so a restart keeps it
+        if self._session_name and fit and self._map is not None:
+            self._map.record(self._session_name, fit, "fitted")
+            await self._store.async_save(self._map.as_dict())
         if len(captures) < MIN_CAPTURES:
             _LOGGER.info(
                 "LIDAR mapping: only %d captures, too thin to merge", len(captures)
             )
-            await self._save_stand_in(stand_in)
             return
 
         captures = self._drop_slow_scans(captures)
@@ -306,18 +334,16 @@ class LidarMapRunner:
                 "LIDAR mapping: only %d captures left after the rotation filter, "
                 "too thin to merge", len(captures),
             )
-            await self._save_stand_in(stand_in)
             return
 
         walls, floor = await self.hass.async_add_executor_job(
             build_session_grids, [c[:4] for c in captures]
         )
         report = await self.hass.async_add_executor_job(
-            self._map.merge_session, walls, floor, self._session_name
+            self._map.merge_session, walls, floor, self._session_name, self._guess
         )
         self.last_report = report
         if report.get("rejected"):
-            await self._save_stand_in(stand_in)
             return
 
         await self._store.async_save(self._map.as_dict())
@@ -325,15 +351,6 @@ class LidarMapRunner:
             "LIDAR map updated: %d wall cells after %d cleanings",
             report.get("total_walls", 0), report.get("sessions", 0),
         )
-
-    async def _save_stand_in(self, stand_in: tuple[int, int, int] | None) -> None:
-        """Keep an unmerged run's stand-in alignment across restarts.
-
-        Without it the run is drawn in the robot's raw frame once Home
-        Assistant restarts, a quarter turn off the walls.
-        """
-        if stand_in and self._map is not None:
-            await self._store.async_save(self._map.as_dict())
 
     @staticmethod
     def _drop_slow_scans(captures: list) -> list:
@@ -375,92 +392,28 @@ class LidarMapRunner:
             return None
         return plan_calibration(self._map.walls, self._map.floor)
 
-    def alignment(self, session_name: str) -> tuple[int, int, int] | None:
-        """How this session was corrected onto the map, if it was merged.
+    def resolve(self, session_name: str, recording: bool = False) -> tuple[tuple[int, int, int] | None, str]:
+        """The alignment a clean's replay is drawn with, and where it comes from.
 
-        The card needs it to draw the run in the same frame as the walls;
-        without it a session recorded after a localisation loss shows its
-        cleaned area a quarter turn off.
+        The one place this is decided, in this order:
+          merged    the clean was merged into the map with it
+          fitted    the clean was not merged; its own fit from its scans
+          live      the clean is recording; its own fit so far
+          previous  the last merged clean's (a recording clean before its own
+                    fit is ready, or a clean with no alignment of its own),
+                    since the robot's frame stays the same from clean to clean
+          none      nothing to go on: the robot's raw frame
         """
         if not self._map:
-            return None
-        # The bridge records a run as <start>.jsonl and, once it ends,
-        # compresses it to <start>.jsonl.hs. The alignment is stored under the
-        # name the run was recorded with.
-        found = self._map.alignments.get(session_name)
-        if found is None and session_name.endswith(".hs"):
-            found = self._map.alignments.get(session_name[: -len(".hs")])
-        return found
-
-    def nearest_alignment(self, session_name: str) -> tuple[int, int, int] | None:
-        """The alignment of the nearest earlier clean, for a clean with none.
-
-        A clean too short to merge has no alignment of its own. The robot's
-        frame stays the same from clean to clean, so the clean before it is
-        a close stand-in, and much closer than the raw frame.
-        """
-        if not self._map or not self._map.alignments:
-            return None
-
-        def start(name: str) -> int:
-            digits = name.split(".", 1)[0]
-            return int(digits) if digits.isdigit() else -1
-
-        this = start(session_name)
-        earlier = [(start(name), align) for name, align in self._map.alignments.items() if 0 <= start(name) <= this]
-        if earlier:
-            return tuple(max(earlier, key=lambda item: item[0])[1])
-        return tuple(list(self._map.alignments.values())[-1])
-
-    async def async_live_alignment(self, session_name: str) -> tuple[int, int, int] | None:
-        """How the run being recorded fits the map so far, from its scans to date.
-
-        A run is merged, and its alignment stored, only when it ends. Until then
-        the replay needs this to draw the live path in the map's frame rather
-        than the robot's frame of the day, which can be a quarter turn round
-        after the robot re-zeroes. Worked out at most once a minute, off the
-        event loop, and only kept when it fits as well as a merge requires.
-        """
-        if not self._collecting or session_name != self._session_name or not self._map or not self._map.walls:
-            return None
-        now = time.monotonic()
-        if self._live_align_busy or now - self._live_align_at < LIVE_ALIGN_EVERY:
-            return self._live_align or self._live_guess
-        captures = self._drop_slow_scans(list(self._captures))
-        if len(captures) < LIVE_ALIGN_MIN_CAPTURES:
-            return self._live_align or self._live_guess
-        self._live_align_busy = True
-        self._live_align_at = now
-        try:
-            walls, _floor = await self.hass.async_add_executor_job(
-                build_session_grids, [c[:4] for c in captures]
-            )
-            quarter, dx, dy, overlap = await self.hass.async_add_executor_job(
-                align_to_reference, walls, self._map.walls
-            )
-            if self._live_guess:
-                near = await self.hass.async_add_executor_job(
-                    align_near, walls, self._map.walls, self._live_guess
-                )
-                if near[3] >= MERGE_MIN_OVERLAP and near[3] >= overlap - LIVE_ALIGN_PREFER_MARGIN:
-                    quarter, dx, dy, overlap = near
-        finally:
-            self._live_align_busy = False
-        _LOGGER.debug(
-            "LIDAR mapping: live fit of %s is %d deg and (%d, %d) cells, %.0f%% overlap",
-            session_name, quarter * 90, dx, dy, 100 * overlap,
-        )
-        if overlap >= MERGE_MIN_OVERLAP:
-            self._live_align = (quarter, dx, dy)
-        return self._live_align or self._live_guess
-
-    def live_alignment_source(self, session_name: str) -> str:
-        """What the live run is drawn with: its own fit, the last run's, or none."""
-        if not self._collecting or session_name != self._session_name:
-            return "none"
-        if self._live_align:
-            return "live"
-        return "previous" if self._live_guess else "none"
+            return None, "none"
+        own = self._map.alignment_of(session_name)
+        if own:
+            return own
+        if recording and self._collecting and self._session_name and run_key(session_name) == run_key(self._session_name):
+            if self._fit:
+                return self._fit, "live"
+        latest = self._map.latest_merged()
+        return (latest, "previous") if latest else (None, "none")
 
     def view_rotation(self, user_offset: float = 0.0) -> float:
         """Rotation that stands the map upright, plus the user's offset."""
