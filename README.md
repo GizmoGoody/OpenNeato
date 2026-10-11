@@ -226,7 +226,7 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
   the features). `state_content` takes `state` and any sensor of the robot by its key, such as
   `charging`, `battery`, `wifi_signal`, `uptime`, `last_clean_area` and `error_message` (the robot's own message, such as asking for the dust bin to be emptied). A sensor with nothing to show is left out of the line. `expanded`
   shows the features when the page loads, until the person has chosen in this browser. `show_chevron`
-  adds an arrow at the top right that also shows or hides them. The card is full width unless its
+  adds a chevron at the top right that also shows or hides them. The card is full width unless its
   layout says otherwise.
 
   Each feature is optional, and each also works in any tile card for the robot.

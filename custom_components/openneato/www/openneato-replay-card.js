@@ -515,7 +515,21 @@ class OpenNeatoReplay extends HTMLElement {
                     border: none;
                     border-radius: 0;
                 }
-                :host { display: block; }
+                :host {
+                    display: block;
+                    /* The type of the tile card's state line, by the same variables
+                       and defaults, so a theme changes both together */
+                    --n-size: var(--ha-tile-info-secondary-font-size, var(--ha-font-size-s, 0.75rem));
+                    --n-weight: var(--ha-tile-info-secondary-font-weight, var(--ha-font-weight-normal, 400));
+                    --n-spacing: var(--ha-tile-info-secondary-letter-spacing, 0.4px);
+                    --n-line: var(--ha-tile-info-secondary-line-height, var(--ha-line-height-condensed, 1.2));
+                }
+                .head, .controls, .corner {
+                    font-size: var(--n-size);
+                    font-weight: var(--n-weight);
+                    letter-spacing: var(--n-spacing);
+                    line-height: var(--n-line);
+                }
                 .stats:empty { display: none; }
                 /* Several elements below set their own display, which would
                    otherwise beat the hidden attribute. */
@@ -549,7 +563,6 @@ class OpenNeatoReplay extends HTMLElement {
                     border-radius: 6px;
                     padding: 3px 4px 3px 8px;
                     font: inherit;
-                    font-size: 0.85rem;
                     cursor: pointer;
                 }
                 .picker .text {
@@ -578,7 +591,6 @@ class OpenNeatoReplay extends HTMLElement {
                     /* The same 16px at the ends as between the figures, so the
                        space around each is even */
                     padding-inline: 16px;
-                    font-size: 0.8rem;
                     color: var(--secondary-text-color);
                     flex: 1 1 auto;
                     min-width: 0;
@@ -599,7 +611,7 @@ class OpenNeatoReplay extends HTMLElement {
                 }
                 .stats b {
                     color: var(--primary-text-color);
-                    font-weight: 500;
+                    font-weight: var(--n-weight);
                 }
                 .stage {
                     position: relative;
@@ -654,7 +666,8 @@ class OpenNeatoReplay extends HTMLElement {
                     display: flex;
                     align-items: center;
                     gap: 8px;
-                    padding: 8px 16px 12px;
+                    /* The top makes room for the time above the scrubber's marker */
+                    padding: 22px 16px 12px;
                     min-width: 0;
                     overflow: hidden;
                     container-type: inline-size;
@@ -682,9 +695,7 @@ class OpenNeatoReplay extends HTMLElement {
                     border-radius: 10px;
                     padding: 3px 8px;
                     font: inherit;
-                    font-size: 0.75rem;
                     font-variant-numeric: tabular-nums;
-                    line-height: 1.4;
                     color: var(--secondary-text-color);
                     border: 1px solid var(--divider-color);
                     min-width: 38px;
@@ -700,8 +711,6 @@ class OpenNeatoReplay extends HTMLElement {
                     border-radius: 10px;
                     padding: 3px 8px;
                     font: inherit;
-                    font-size: 0.75rem;
-                    line-height: 1.4;
                     white-space: nowrap;
                     color: var(--live);
                     border: 1px solid var(--live);
@@ -732,8 +741,6 @@ class OpenNeatoReplay extends HTMLElement {
                     border-radius: 10px;
                     padding: 3px 8px;
                     font: inherit;
-                    font-size: 0.75rem;
-                    line-height: 1.4;
                     white-space: nowrap;
                     color: #fff;
                     background: var(--method);
@@ -766,15 +773,36 @@ class OpenNeatoReplay extends HTMLElement {
                 }
                 .clock {
                     font-variant-numeric: tabular-nums;
-                    font-size: 0.8rem;
                     color: var(--secondary-text-color);
                     min-width: 42px;
                     text-align: center;
                 }
-                input[type="range"] {
+                /* The scrubber, with the time so far just above its marker */
+                .scrubwrap {
+                    position: relative;
                     flex: 1 1 0;
                     width: 0;
                     min-width: 32px;
+                    display: flex;
+                    align-items: center;
+                    --thumb: 18px;
+                    --frac: 0;
+                }
+                .tip {
+                    position: absolute;
+                    bottom: calc(50% + var(--thumb) / 2 + 2px);
+                    left: calc(var(--thumb) / 2 + var(--frac) * (100% - var(--thumb)));
+                    transform: translateX(-50%);
+                    font-variant-numeric: tabular-nums;
+                    color: var(--primary-text-color);
+                    white-space: nowrap;
+                    pointer-events: none;
+                }
+                input[type="range"] {
+                    flex: 1 1 auto;
+                    width: 100%;
+                    min-width: 0;
+                    margin: 0;
                     -webkit-appearance: none;
                     appearance: none;
                     height: 6px;
@@ -790,15 +818,17 @@ class OpenNeatoReplay extends HTMLElement {
                 }
                 input[type="range"]::-webkit-slider-thumb {
                     -webkit-appearance: none;
-                    width: 14px;
-                    height: 14px;
+                    width: var(--thumb);
+                    height: var(--thumb);
+                    box-sizing: border-box;
                     border-radius: 50%;
                     background: var(--primary-text-color);
                     border: 2px solid var(--card-background-color);
                 }
                 input[type="range"]::-moz-range-thumb {
-                    width: 14px;
-                    height: 14px;
+                    width: var(--thumb);
+                    height: var(--thumb);
+                    box-sizing: border-box;
                     border-radius: 50%;
                     background: var(--primary-text-color);
                     border: 2px solid var(--card-background-color);
@@ -832,8 +862,10 @@ class OpenNeatoReplay extends HTMLElement {
                         <svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/></svg>
                     </button>
                     <button class="speed" title="Playback speed" disabled>8&times;</button>
-                    <span class="clock elapsed">0:00</span>
-                    <input type="range" class="scrub" min="0" max="1" step="0.05" value="0" disabled>
+                    <div class="scrubwrap">
+                        <span class="tip elapsed">0:00</span>
+                        <input type="range" class="scrub" min="0" max="1" step="0.05" value="0" disabled>
+                    </div>
                     <span class="clock total">0:00</span>
                 </div>
             </ha-card>
@@ -855,6 +887,7 @@ class OpenNeatoReplay extends HTMLElement {
         this._elapsedEl = root.querySelector(".elapsed");
         this._totalEl = root.querySelector(".total");
         this._scrub = root.querySelector(".scrub");
+        this._scrubWrap = root.querySelector(".scrubwrap");
         this._liveBtn = root.querySelector(".live");
         this._methodEl = root.querySelector(".method");
         this._fadeCanvas = root.querySelector("canvas.fade");
@@ -2721,6 +2754,7 @@ class OpenNeatoReplay extends HTMLElement {
         }
         const played = duration > 0 ? (this._time / duration) * 100 : 0;
         this._scrub.style.setProperty("--played", `${played}%`);
+        this._scrubWrap.style.setProperty("--frac", String(played / 100));
         // Keyed on the duration as well: a live session grows, and the
         // recharge marks have to move with it.
         const trackKey = `${this._session.name}|${duration}`;
@@ -2905,6 +2939,8 @@ const FEATURE_CSS = `
         display: flex; align-items: center; justify-content: center; gap: 6px; box-sizing: border-box;
     }
     .key.wide { flex: 1 1 40%; }
+    .choice { flex: 1 1 40%; min-width: 0; display: flex; }
+    .choice .key { width: 100%; }
     .key[aria-pressed="true"] { background: var(--primary-color); color: var(--text-primary-color, #fff); }
     .key:disabled { opacity: .5; cursor: default; }
     span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2960,20 +2996,35 @@ class OpenNeatoFeature extends HTMLElement {
 
     _button(b) {
         if (b.options) {
-            const select = document.createElement("select");
-            select.className = "key wide";
-            select.dataset.key = b.key;
-            select.setAttribute("aria-label", b.label);
-            select.title = b.label;
+            // Home Assistant's dropdown, as its own select features use it
+            const menu = document.createElement("ha-dropdown");
+            menu.className = "choice";
+            menu.dataset.key = b.key;
+            menu.setAttribute("placement", "bottom");
+            const trigger = document.createElement("button");
+            trigger.type = "button";
+            trigger.slot = "trigger";
+            trigger.className = "key";
+            trigger.title = b.label;
+            trigger.setAttribute("aria-label", b.label);
+            const shown = document.createElement("span");
+            shown.textContent = b.options.find((o) => o.value === b.value)?.label ?? b.value;
+            const caret = document.createElement("ha-svg-icon");
+            caret.path = MDI_MENU_DOWN;
+            trigger.append(shown, caret);
+            menu.append(trigger);
             for (const option of b.options) {
-                const el = document.createElement("option");
-                el.value = option.value;
-                el.textContent = option.label;
-                select.append(el);
+                const item = document.createElement("ha-dropdown-item");
+                item.value = option.value;
+                item.selected = option.value === b.value;
+                item.textContent = option.label;
+                menu.append(item);
             }
-            select.value = b.value;
-            select.addEventListener("change", () => b.choose(select.value));
-            return select;
+            menu.addEventListener("wa-select", (ev) => {
+                const value = ev.detail?.item?.value;
+                if (value !== undefined && value !== b.value) b.choose(value);
+            });
+            return menu;
         }
         const button = document.createElement("button");
         button.type = "button";
@@ -3132,7 +3183,7 @@ class OpenNeatoCard extends HTMLElement {
         this._open = false;
         this._tile = null;
         this._memo = {};
-        // A tap on the tile card, or on the arrow, shows or hides the features
+        // A tap on the tile card, or on the chevron, shows or hides the features
         this._frame.addEventListener("ll-custom", (ev) => {
             if (ev.detail?.openneato_card !== "toggle") return;
             ev.stopPropagation();
@@ -3547,7 +3598,7 @@ class OpenNeatoCardEditor extends HTMLElement {
         this._form.computeHelper = (s) => s.helper;
         this._form.schema = [
             toggle("expanded", "Expanded on load"),
-            toggle("show_chevron", "Expand arrow", "An arrow at the top right that shows or hides the features. A tap on the card does it too."),
+            toggle("show_chevron", "Chevron", "A chevron at the top right that shows or hides the features. A tap on the card does it too."),
         ];
         this._form.addEventListener("value-changed", (ev) => {
             ev.stopPropagation();
