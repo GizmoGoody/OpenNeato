@@ -231,8 +231,10 @@ async def ws_get_session(
     # Serve the run in the map's frame, not the robot's frame of the day. A run
     # still recording has not been merged, so it gets its fit so far.
     align = runner.alignment(name) if runner is not None else None
+    source = "merged" if align is not None else "none"
     if align is None and runner is not None and was_recording:
         align = await runner.async_live_alignment(name)
+        source = runner.live_alignment_source(name)
 
     # Coverage-grid construction is CPU-bound; keep it off the event loop.
     try:
@@ -247,6 +249,10 @@ async def ws_get_session(
     if not parsed.get("path"):
         connection.send_error(msg["id"], "empty_session", "Session contains no pose data")
         return
+    # Which alignment the run is drawn with, so the card can say while a live
+    # clean is still settling: merged, live (its own fit), previous (the last
+    # clean's, until its own is ready) or none
+    parsed["alignment_source"] = source
 
     # Evaluated now rather than before the fetch: the session may have
     # completed while we were downloading it, and the flag the card gets

@@ -142,6 +142,33 @@ def _rotate_cells(cells: Iterable[tuple[int, int]], quarter: int) -> list[tuple[
     return [(cy, -cx) for cx, cy in cells]
 
 
+def align_near(
+    new_walls: dict[tuple[int, int], int],
+    ref_walls: dict[tuple[int, int], int],
+    guess: tuple[int, int, int],
+    search_cells: int = 12,
+) -> tuple[int, int, int, float]:
+    """Fit a new session's walls onto the map close to a known alignment.
+
+    Only the guess's quarter turn, and shifts within search_cells of its
+    shift. Returns (quarter, dx, dy, overlap), scored as align_to_reference
+    scores.
+    """
+    if not ref_walls or not new_walls:
+        return 0, 0, 0, 0.0
+    quarter, gx, gy = (int(v) for v in guess)
+    ref = set(ref_walls)
+    rotated = _rotate_cells(new_walls, quarter)
+    best = (quarter, gx, gy, -1.0)
+    for dx in range(gx - search_cells, gx + search_cells + 1):
+        for dy in range(gy - search_cells, gy + search_cells + 1):
+            hit = sum(1 for cx, cy in rotated if (cx + dx, cy + dy) in ref)
+            score = hit / min(len(rotated), len(ref))
+            if score > best[3]:
+                best = (quarter, dx, dy, score)
+    return best
+
+
 def align_to_reference(
     new_walls: dict[tuple[int, int], int],
     ref_walls: dict[tuple[int, int], int],
