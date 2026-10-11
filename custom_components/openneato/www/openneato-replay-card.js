@@ -126,6 +126,10 @@ const REPLAY_DEFAULTS = {
     coverage: { trail: true, tiled: true },
 };
 
+// Material Design Icons, as Home Assistant draws them
+const MDI_MENU_DOWN = "M7,10L12,15L17,10H7Z";
+const MDI_DELETE = "M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z";
+
 // The alignment badge's word for each way a live clean can be lined up
 const ALIGNMENT_WORDS = { dock: "Dock", live: "Walls", previous: "Previous", none: "Unaligned" };
 const ALIGNMENT_TITLES = {
@@ -528,16 +532,44 @@ class OpenNeatoReplay extends HTMLElement {
                     padding: 12px 16px 8px;
                     flex-wrap: nowrap;
                 }
-                select {
+                ha-dropdown {
+                    flex: 0 1 auto;
+                    min-width: 0;
+                    max-width: 55%;
+                }
+                /* The menu's button: the date of the session on screen */
+                .picker {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 2px;
+                    max-width: 100%;
                     background: var(--secondary-background-color);
                     color: var(--primary-text-color);
                     border: 1px solid var(--divider-color);
                     border-radius: 6px;
-                    padding: 4px 8px;
+                    padding: 3px 4px 3px 8px;
+                    font: inherit;
                     font-size: 0.85rem;
-                    flex: 0 1 auto;
-                    min-width: 0;
-                    max-width: 55%;
+                    cursor: pointer;
+                }
+                .picker .text {
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+                .picker ha-svg-icon {
+                    --mdc-icon-size: 18px;
+                    flex: 0 0 auto;
+                }
+                /* Each finished session's own delete button, at the end of its line */
+                ha-dropdown-item ha-icon-button {
+                    --mdc-icon-button-size: 32px;
+                    --mdc-icon-size: 18px;
+                    margin: -4px -4px -4px 8px;
+                    color: var(--secondary-text-color);
+                }
+                ha-dropdown-item ha-icon-button:hover {
+                    color: var(--error-color, #db4437);
                 }
                 .stats {
                     display: flex;
@@ -564,32 +596,6 @@ class OpenNeatoReplay extends HTMLElement {
                 }
                 .stats span:last-child {
                     margin-right: auto;
-                }
-                .del {
-                    flex: 0 0 auto;
-                    display: grid;
-                    place-items: center;
-                    width: 28px;
-                    height: 28px;
-                    padding: 0;
-                    border: none;
-                    border-radius: 6px;
-                    background: transparent;
-                    color: var(--secondary-text-color);
-                    cursor: pointer;
-                }
-                .del svg {
-                    width: 17px;
-                    height: 17px;
-                    fill: currentColor;
-                }
-                .del:hover:not(:disabled) {
-                    color: var(--error-color, #db4437);
-                    background: var(--secondary-background-color);
-                }
-                .del:disabled {
-                    opacity: 0.35;
-                    cursor: default;
                 }
                 .stats b {
                     color: var(--primary-text-color);
@@ -800,10 +806,11 @@ class OpenNeatoReplay extends HTMLElement {
             </style>
             <ha-card>
                 <div class="head">
-                    <select class="picker" aria-label="Cleaning session"></select>
-                    <button class="del" title="Delete this session" aria-label="Delete this session" disabled>
-                        <svg viewBox="0 0 24 24"><path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-                    </button>
+                    <ha-dropdown class="sessions" placement="bottom-start">
+                        <button class="picker" slot="trigger" type="button" aria-label="Cleaning session">
+                            <span class="text"></span><ha-svg-icon></ha-svg-icon>
+                        </button>
+                    </ha-dropdown>
                     <div class="stats"></div>
                 </div>
                 <div class="stage">
@@ -834,9 +841,11 @@ class OpenNeatoReplay extends HTMLElement {
 
         this._card = root.querySelector("ha-card");
         this._head = root.querySelector(".head");
+        this._menu = root.querySelector("ha-dropdown.sessions");
         this._picker = root.querySelector(".picker");
+        this._pickerText = root.querySelector(".picker .text");
+        root.querySelector(".picker ha-svg-icon").path = MDI_MENU_DOWN;
         this._statsEl = root.querySelector(".stats");
-        this._delBtn = root.querySelector(".del");
         this._stage = root.querySelector(".stage");
         this._canvas = root.querySelector("canvas");
         this._overlay = root.querySelector(".overlay");
@@ -854,31 +863,24 @@ class OpenNeatoReplay extends HTMLElement {
         root.querySelector(`.corner.${this._config.live_badge_position}`).append(this._liveBtn);
 
         this._stage.style.height = `${Number(this._config.height) || DEFAULTS.height}px`;
-        this._picker.hidden = !this._config.show_picker;
-        // The delete button acts on the picker's selection, so it follows it.
-        // Set `show_picker: false` to hide both.
-        this._delBtn.hidden = !this._config.show_picker;
+        this._menu.hidden = !this._config.show_picker;
 
-        this._picker.addEventListener("change", () => {
+        this._menu.addEventListener("wa-select", (ev) => {
+            const name = ev.detail?.item?.value;
+            if (!name || name === this._selectedName) return;
             // A manual pick is pinned: list refreshes must not pull the user
             // off it onto a clean that is already running.
             this._userPicked = true;
-            this._selectSession(this._picker.value);
-            this._setPickerOpen(false);
+            this._selectSession(name);
         });
-        // The list opens on a press or a key; see _setPickerOpen
-        for (const type of ["pointerdown", "mousedown", "touchstart"]) {
-            this._picker.addEventListener(type, () => this._setPickerOpen(true), { passive: true });
-        }
-        this._picker.addEventListener("keydown", (ev) => {
-            if (ev.key === "Escape" || ev.key === "Enter" || ev.key === "Tab") this._setPickerOpen(false);
-            // An arrow alone changes the selection on a closed picker; Alt+arrow and Space open the list
-            else if (ev.key === " " || (ev.altKey && (ev.key === "ArrowDown" || ev.key === "ArrowUp"))) {
-                this._setPickerOpen(true);
-            }
+        // Delete on the keyboard deletes the session in focus
+        this._menu.addEventListener("keydown", (ev) => {
+            if (ev.key !== "Delete") return;
+            const item = ev.composedPath().find((node) => node.localName === "ha-dropdown-item");
+            if (!item?.value) return;
+            ev.preventDefault();
+            this._deleteSession(item.value);
         });
-        this._picker.addEventListener("blur", () => this._setPickerOpen(false));
-        this._delBtn.addEventListener("click", () => this._deleteSelected());
         this._playBtn.addEventListener("click", () => this._togglePlay());
         this._restartBtn.addEventListener("click", () => this._restart());
         this._speedBtn.addEventListener("click", () => this._cycleSpeed());
@@ -927,6 +929,10 @@ class OpenNeatoReplay extends HTMLElement {
             this._scheduleRender();
         });
         this._resizeObserver.observe(this._stage);
+        // A narrower header can mean the battery has to shorten, a wider one that it no longer does
+        if (this._headObserver) this._headObserver.disconnect();
+        this._headObserver = new ResizeObserver(() => this._renderStats());
+        this._headObserver.observe(this._head);
     }
 
     // Pan with drag, zoom with wheel/pinch, anchored on the pointer so the
@@ -1126,29 +1132,22 @@ class OpenNeatoReplay extends HTMLElement {
         } else if (this._live && !nowRecording) {
             // Finished. One more fetch brings the summary — quietly, so the
             // map, pan/zoom and playhead stay where they are — and live mode
-            // ends: the chip goes, delete comes back, polling stops.
+            // ends: the chip goes, its delete button comes back, polling stops.
             this._finalDue = true;
             this._setLive(false);
             await this._refreshLive();
         } else if (!this._live && nowRecording && this._loadState !== null) {
             this._setLive(true);
         }
-        this._syncDelete();
     }
 
-    async _deleteSelected() {
-        const name = this._selectedName;
-        if (!name || this._loading || this._live) return;
-
-        // Label the confirmation with what the user actually sees in the
-        // picker, not the raw filename.
-        const opt = this._picker.selectedOptions[0];
-        const label = opt ? opt.textContent : name;
-        if (!window.confirm(`Delete this cleaning session?\n\n${label}\n\nThis cannot be undone.`)) {
+    async _deleteSession(name) {
+        const row = (this._pickerRows || []).find((r) => r.name === name);
+        if (!row || row.recording || this._loading) return;
+        if (!window.confirm(`Delete this cleaning session?\n\n${row.full}\n\nThis cannot be undone.`)) {
             return;
         }
 
-        this._delBtn.disabled = true;
         try {
             await this._hass.callWS({
                 type: "openneato/delete_session",
@@ -1158,19 +1157,18 @@ class OpenNeatoReplay extends HTMLElement {
         } catch (err) {
             if (err && err.code === "recording") {
                 // It started recording between two list ticks. Refresh the
-                // list now; the button follows the live flag from there.
+                // list now; its line loses the delete button from there.
                 this._flash("Still recording — try again when the clean finishes");
                 this._lastListAt = 0;
                 this._loadSessions();
             } else {
                 this._flash(`Could not delete: ${err.message || err}`);
-                this._syncDelete();
             }
             return;
         }
 
-        // Fall back to whichever session is newest once this one is gone.
-        this._clearSelection();
+        // Once the session on screen is gone, the newest one takes its place
+        if (name === this._selectedName) this._clearSelection();
         this._lastListAt = 0;
         await this._loadSessions();
     }
@@ -1191,57 +1189,53 @@ class OpenNeatoReplay extends HTMLElement {
         return label;
     }
 
-    // Rebuilt only when the labels change. Rewriting the options on every
-    // refresh closed the dropdown under the user and, for a moment, pointed
-    // the delete confirmation at the wrong session.
+    // Rebuilt only when the lines change, so a refresh does not close the
+    // menu under the user.
     _renderPicker() {
-        if (!this._picker) return;
+        if (!this._menu) return;
         const rows = this._sessions.map((s) => ({
             name: s.name,
             full: this._sessionLabel(s),
             date: this._sessionDate(s),
+            recording: Boolean(s.recording),
         }));
-        const sig = `${rows.map((r) => `${r.name}|${r.full}`).join("\n")}|${this._units}`;
+        const sig = `${rows.map((r) => `${r.name}|${r.full}|${r.recording}`).join("\n")}|${this._units}`;
         if (sig === this._pickerSig) return;
         this._pickerSig = sig;
         this._pickerRows = rows;
-        this._picker.replaceChildren(
-            ...rows.map((r) => {
-                const option = document.createElement("option");
-                option.value = r.name;
-                return option;
-            }),
-        );
-        if (this._selectedName) this._picker.value = this._selectedName;
-        this._applyPickerText();
+        this._menu.replaceChildren(this._picker, ...rows.map((r) => this._pickerItem(r)));
+        this._showPicked();
     }
 
-    // Closed, the picker shows only the date and time of the session on screen
-    // (the rest of the line is the mode and area, which the stats row and the
-    // open list already give). Open, every session shows its full line.
-    //
-    // A <select> has no event for its list opening or closing, so this follows
-    // the events that lead there. Opening is certain (the press or key comes
-    // first); closing without a choice, or by choosing the session already
-    // selected, fires no event, so the full lines stay until the picker loses
-    // focus. The width is held while the list is open so the header does not
-    // jump when the text grows.
-    _setPickerOpen(open) {
-        if (open === this._pickerOpen) return;
-        this._pickerOpen = open;
-        // Held at the width it has now: the row is full, so without this the picker
-        // would also shrink back to fit once the text is longer
-        const hold = open ? `${this._picker.getBoundingClientRect().width}px` : "";
-        this._picker.style.width = hold;
-        this._picker.style.flexShrink = open ? "0" : "";
-        this._applyPickerText();
+    // One session's line: the date, mode and area, and a delete button once
+    // the clean has finished
+    _pickerItem(r) {
+        const item = document.createElement("ha-dropdown-item");
+        item.value = r.name;
+        item.append(r.full);
+        if (!r.recording) {
+            const del = document.createElement("ha-icon-button");
+            del.slot = "details";
+            del.path = MDI_DELETE;
+            del.label = "Delete this session";
+            del.addEventListener("click", (ev) => {
+                // The button deletes; it does not also choose the session
+                ev.stopPropagation();
+                this._deleteSession(r.name);
+            });
+            item.append(del);
+        }
+        return item;
     }
 
-    _applyPickerText() {
-        const options = this._picker.options;
-        (this._pickerRows || []).forEach((r, i) => {
-            if (options[i]) options[i].textContent = this._pickerOpen ? r.full : r.date;
-        });
+    // The menu's button shows the date of the session on screen, and its line is marked
+    _showPicked() {
+        if (!this._menu) return;
+        const row = (this._pickerRows || []).find((r) => r.name === this._selectedName);
+        this._pickerText.textContent = row ? row.date : "";
+        for (const item of this._menu.querySelectorAll("ha-dropdown-item")) {
+            item.selected = item.value === this._selectedName;
+        }
     }
 
     _fetchSession(name) {
@@ -1257,7 +1251,7 @@ class OpenNeatoReplay extends HTMLElement {
     async _selectSession(name) {
         if (!name || this._loading) return;
         this._selectedName = name;
-        this._picker.value = name;
+        this._showPicked();
         this._loading = true;
         this._loadState = null;
         this._finalDue = false;
@@ -1359,7 +1353,6 @@ class OpenNeatoReplay extends HTMLElement {
             // The user scrubbed back: leave the playhead where they put it.
             this._seek(Math.min(this._time, session.duration));
         }
-        this._syncDelete();
         this._renderStats();
         this._renderChip();
         this._dirty = true;
@@ -1381,7 +1374,6 @@ class OpenNeatoReplay extends HTMLElement {
             this._loadState = "error";
             this._fail(`Could not load this session\n${msg}`);
         }
-        this._syncDelete();
         this._renderChip();
     }
 
@@ -1417,7 +1409,8 @@ class OpenNeatoReplay extends HTMLElement {
         }
     }
 
-    _renderStats() {
+    // `compact`: the row did not fit, so the battery shows only what the clean used
+    _renderStats(compact = false) {
         if (!this._statsEl || !this._session) return;
         const show = (key) => this._config[key] !== false;
         const s = this._session.summary || {};
@@ -1425,9 +1418,11 @@ class OpenNeatoReplay extends HTMLElement {
         const units = this._units;
         const locale = this._locale();
         const bits = [];
-        const figure = (label, value) => (this._config.hide_labels
-            ? `<span title="${label}" aria-label="${label} ${value}"><b>${value}</b></span>`
-            : `<span>${label} <b>${value}</b></span>`);
+        const figure = (label, value, hint = label) => (this._config.hide_labels
+            ? `<span title="${hint}" aria-label="${hint} ${value}"><b>${value}</b></span>`
+            : `<span${hint === label ? "" : ` title="${hint}"`}>${label} <b>${value}</b></span>`);
+        const used = (start, end) => figure("Battery", `Δ${start - end}%`, "Battery used");
+        let shortens = false;
         // Date, mode and area are all in the picker's own label
         // ("19/08 11:32 — House Clean · 27.3 m²"), so repeating them beside
         // it just spends the row saying the same thing twice. They come back
@@ -1455,7 +1450,10 @@ class OpenNeatoReplay extends HTMLElement {
                 bits.push(figure("Duration", formatClock(this._session.duration + since)));
             }
             if (show("show_battery")) {
-                if (info.battery !== undefined) bits.push(figure("Battery", `${info.battery}%`));
+                const now = this._batteryNow();
+                if (info.battery !== undefined && now !== null) shortens = true;
+                if (compact && shortens) bits.push(used(info.battery, now));
+                else if (info.battery !== undefined) bits.push(figure("Battery", `${info.battery}%`));
                 const recharges = this._session.recharges.length;
                 if (recharges > 0) bits.push(figure("Recharges", recharges));
             }
@@ -1470,12 +1468,25 @@ class OpenNeatoReplay extends HTMLElement {
             if (duration && show("show_duration")) bits.push(figure("Duration", formatClock(duration)));
             if (show("show_battery")) {
                 if (s.batteryStart !== undefined && s.batteryEnd !== undefined) {
-                    bits.push(figure("Battery", `${s.batteryStart}% → ${s.batteryEnd}%`));
+                    shortens = true;
+                    bits.push(compact ? used(s.batteryStart, s.batteryEnd) : figure("Battery", `${s.batteryStart}% → ${s.batteryEnd}%`));
                 }
                 if (s.recharges) bits.push(figure("Recharges", s.recharges));
             }
         }
         this._statsEl.innerHTML = bits.join("");
+        const overflows = this._statsEl.scrollWidth > this._statsEl.clientWidth + 1;
+        if (!compact && shortens && overflows) this._renderStats(true);
+    }
+
+    // The robot's battery level now, from its battery sensor
+    _batteryNow() {
+        const id = this._context?.entity_id;
+        const hass = this._hass;
+        if (!id || !hass) return null;
+        const sensor = siblings(hass, id, ["sensor"]).find((e) => hass.states[e.entity_id].attributes.device_class === "battery");
+        const level = Number(sensor ? hass.states[sensor.entity_id].state : hass.states[id]?.attributes?.battery_level);
+        return Number.isFinite(level) ? Math.round(level) : null;
     }
 
     /* ---- live state ---- */
@@ -1493,16 +1504,7 @@ class OpenNeatoReplay extends HTMLElement {
                 this._quarterLock = null;
             }
         }
-        this._syncDelete();
         this._renderChip();
-    }
-
-    _syncDelete() {
-        if (!this._delBtn) return;
-        this._delBtn.disabled = !this._selectedName || this._live;
-        const title = this._live ? "Can't delete a session that is still recording" : "Delete this session";
-        this._delBtn.title = title;
-        this._delBtn.setAttribute("aria-label", title);
     }
 
     // The one live indicator, in the controls row. Shown only while the
@@ -3070,7 +3072,7 @@ class OpenNeatoConfiguration extends OpenNeatoFeature {
 /* ── the card ────────────────────────────────────────────────────────── */
 
 // The card's only option of its own. Everything else is the tile card's.
-const OWN_KEYS = ["expanded"];
+const OWN_KEYS = ["expanded", "show_chevron"];
 const TOGGLE_ACTION = { action: "fire-dom-event", openneato_card: "toggle" };
 
 // The tile card's own configuration. A tap on the tile shows or hides the
@@ -3246,7 +3248,7 @@ class OpenNeatoCard extends HTMLElement {
     _apply() {
         const entity = this._entityId;
         this._notice.hidden = Boolean(entity) || !this._hass;
-        this._chevron.hidden = !entity;
+        this._chevron.hidden = !entity || this._config.show_chevron !== true;
         this._chevron.setAttribute("aria-expanded", String(this._open));
         this._chevron.setAttribute("aria-label", this._open ? "Hide the features" : "Show the features");
         if (!entity) return;
@@ -3543,10 +3545,14 @@ class OpenNeatoCardEditor extends HTMLElement {
         this._error = this.shadowRoot.querySelector("ha-alert");
         this._form.computeLabel = (s) => s.label ?? s.name;
         this._form.computeHelper = (s) => s.helper;
-        this._form.schema = [toggle("expanded", "Expanded on load")];
+        this._form.schema = [
+            toggle("expanded", "Expanded on load"),
+            toggle("show_chevron", "Expand arrow", "An arrow at the top right that shows or hides the features. A tap on the card does it too."),
+        ];
         this._form.addEventListener("value-changed", (ev) => {
             ev.stopPropagation();
-            const next = { ...this._config, expanded: ev.detail.value.expanded === true };
+            const value = ev.detail.value;
+            const next = { ...this._config, expanded: value.expanded === true, show_chevron: value.show_chevron === true };
             this._config = next;
             this._render();
             this._fire();
@@ -3622,7 +3628,7 @@ class OpenNeatoCardEditor extends HTMLElement {
     }
 
     _render() {
-        this._form.data = { expanded: this._config.expanded === true };
+        this._form.data = { expanded: this._config.expanded === true, show_chevron: this._config.show_chevron === true };
     }
 
     _fire() {
