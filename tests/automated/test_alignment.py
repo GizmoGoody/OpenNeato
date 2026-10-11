@@ -271,7 +271,7 @@ async def test_an_unmerged_cleans_stand_in_is_saved(hass: HomeAssistant) -> None
     runner._captures = []
     await runner._finish()
     runner._store.async_save.assert_awaited_once()
-    assert runner._store.async_save.await_args.args[0]["alignments"][NAME] == (1, 3, 2)
+    assert list(runner._store.async_save.await_args.args[0]["alignments"][NAME]) == [1, 3, 2]
 
 
 async def test_a_finished_unmerged_clean_is_served_with_the_nearest_alignment(hass: HomeAssistant) -> None:
