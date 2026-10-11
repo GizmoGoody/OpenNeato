@@ -556,19 +556,30 @@
   test("card: it keeps its place on screen while it opens or closes", () => hasFeaturesList() && source().includes("_keepInPlace"), async () => {
     clearStage();
     forgetOpenState();
+    // A scrolling box with content above the card, as a dashboard view has
+    const box = document.createElement("div");
+    Object.assign(box.style, { height: "400px", overflowY: "auto" });
     const spacer = document.createElement("div");
-    spacer.style.height = "3000px";
-    stage().append(spacer);
+    spacer.style.height = "1000px";
+    box.append(spacer);
+    stage().append(box);
     const el = mountCard({ entity: VACUUM, features: [REPLAY] });
+    box.append(el);
+    const tail = document.createElement("div");
+    tail.style.height = "1000px";
+    box.append(tail);
     await tileReady(el);
-    window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY - 200);
+    box.scrollTop = el.offsetTop - box.offsetTop - 100;
     await sleep(100);
     const before = el.getBoundingClientRect().top;
-    // As the dashboard does when it lays out again: the card is pushed down
-    el._anchor = { top: before, until: performance.now() + 1500 };
-    spacer.style.height = "3150px";
-    await until(() => Math.abs(el.getBoundingClientRect().top - before) < 1, "the card back in its place");
-    window.scrollTo(0, 0);
+    for (const step of ["open", "close"]) {
+      // As the dashboard does when it lays out again: the card changes height
+      // while the content above it moves
+      el._setOpen(!el._open);
+      spacer.style.height = `${parseFloat(spacer.style.height) + 150}px`;
+      await until(() => Math.abs(el.getBoundingClientRect().top - before) < 1, `the card back in its place after it ${step}s`);
+      await sleep(200);
+    }
   });
 
   test("card: the arrow opens and closes it too, and says which", hasCard, async () => {
