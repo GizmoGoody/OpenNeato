@@ -785,7 +785,7 @@ class OpenNeatoReplay extends HTMLElement {
                     min-width: 32px;
                     display: flex;
                     align-items: center;
-                    --thumb: 14px;
+                    --thumb: 18px;
                     --frac: 0;
                 }
                 .tip {
@@ -819,6 +819,7 @@ class OpenNeatoReplay extends HTMLElement {
                     -webkit-appearance: none;
                     width: var(--thumb);
                     height: var(--thumb);
+                    box-sizing: border-box;
                     border-radius: 50%;
                     background: var(--primary-text-color);
                     border: 2px solid var(--card-background-color);
@@ -826,6 +827,7 @@ class OpenNeatoReplay extends HTMLElement {
                 input[type="range"]::-moz-range-thumb {
                     width: var(--thumb);
                     height: var(--thumb);
+                    box-sizing: border-box;
                     border-radius: 50%;
                     background: var(--primary-text-color);
                     border: 2px solid var(--card-background-color);
