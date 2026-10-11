@@ -555,15 +555,30 @@ class OpenNeatoReplay extends HTMLElement {
                 .picker {
                     display: inline-flex;
                     align-items: center;
-                    gap: 2px;
+                    gap: 10px;
                     max-width: 100%;
-                    background: var(--secondary-background-color);
+                    height: var(--feature-height, 42px);
+                    box-sizing: border-box;
+                    /* The shape and fill of Home Assistant's select menu (its own
+                       component cannot carry a delete button on each line) */
+                    background: color-mix(in srgb, var(--disabled-color, #bdbdbd) 20%, transparent);
                     color: var(--primary-text-color);
-                    border: 1px solid var(--divider-color);
-                    border-radius: 6px;
-                    padding: 3px 4px 3px 8px;
+                    border: none;
+                    border-radius: var(--ha-border-radius-lg, 12px);
+                    padding: 6px 10px;
                     font: inherit;
+                    font-size: var(--ha-font-size-m, 1rem);
+                    font-weight: var(--ha-font-weight-normal, 400);
+                    letter-spacing: 0.25px;
+                    line-height: 1.4;
                     cursor: pointer;
+                }
+                ha-dropdown::part(menu) {
+                    min-width: var(--select-menu-width, 0);
+                }
+                ha-dropdown-item {
+                    font-size: var(--ha-font-size-m, 1rem);
+                    letter-spacing: 0.25px;
                 }
                 .picker .text {
                     overflow: hidden;
@@ -898,6 +913,10 @@ class OpenNeatoReplay extends HTMLElement {
         this._stage.style.height = `${Number(this._config.height) || DEFAULTS.height}px`;
         this._menu.hidden = !this._config.show_picker;
 
+        // The menu is as wide as its button, at least
+        this._menu.addEventListener("wa-show", () => {
+            this._menu.style.setProperty("--select-menu-width", `${this._picker.offsetWidth}px`);
+        });
         this._menu.addEventListener("wa-select", (ev) => {
             const name = ev.detail?.item?.value;
             if (!name || name === this._selectedName) return;
@@ -2939,8 +2958,7 @@ const FEATURE_CSS = `
         display: flex; align-items: center; justify-content: center; gap: 6px; box-sizing: border-box;
     }
     .key.wide { flex: 1 1 40%; }
-    .choice { flex: 1 1 40%; min-width: 0; display: flex; }
-    .choice .key { width: 100%; }
+    .choice { flex: 1 1 40%; min-width: 0; --control-select-menu-height: var(--feature-height, 42px); }
     .key[aria-pressed="true"] { background: var(--primary-color); color: var(--text-primary-color, #fff); }
     .key:disabled { opacity: .5; cursor: default; }
     span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2996,30 +3014,15 @@ class OpenNeatoFeature extends HTMLElement {
 
     _button(b) {
         if (b.options) {
-            // Home Assistant's dropdown, as its own select features use it
-            const menu = document.createElement("ha-dropdown");
-            menu.className = "choice";
+            // Home Assistant's own select menu, as its select features use it. It is
+            // always loaded with the tile card, which imports every tile feature.
+            const menu = document.createElement("ha-control-select-menu");
             menu.dataset.key = b.key;
-            menu.setAttribute("placement", "bottom");
-            const trigger = document.createElement("button");
-            trigger.type = "button";
-            trigger.slot = "trigger";
-            trigger.className = "key";
-            trigger.title = b.label;
-            trigger.setAttribute("aria-label", b.label);
-            const shown = document.createElement("span");
-            shown.textContent = b.options.find((o) => o.value === b.value)?.label ?? b.value;
-            const caret = document.createElement("ha-svg-icon");
-            caret.path = MDI_MENU_DOWN;
-            trigger.append(shown, caret);
-            menu.append(trigger);
-            for (const option of b.options) {
-                const item = document.createElement("ha-dropdown-item");
-                item.value = option.value;
-                item.selected = option.value === b.value;
-                item.textContent = option.label;
-                menu.append(item);
-            }
+            menu.className = "choice";
+            menu.setAttribute("show-arrow", "");
+            menu.label = b.label;
+            menu.options = b.options;
+            menu.value = b.value;
             menu.addEventListener("wa-select", (ev) => {
                 const value = ev.detail?.item?.value;
                 if (value !== undefined && value !== b.value) b.choose(value);
