@@ -552,20 +552,28 @@ class OpenNeatoReplay extends HTMLElement {
                     max-width: 55%;
                 }
                 /* The menu's button: the date of the session on screen */
+                /* Home Assistant's select menu as its tile features set it up:
+                   the theme's feature height, corners and colour, and the
+                   component's own fill, hover and focus ring (the component
+                   itself cannot carry a delete button on each line) */
                 .picker {
+                    --menu-fill: var(--disabled-color);
+                    position: relative;
+                    overflow: hidden;
+                    z-index: 0;
                     display: inline-flex;
                     align-items: center;
                     gap: 10px;
                     max-width: 100%;
                     height: var(--feature-height, 42px);
                     box-sizing: border-box;
-                    /* The shape and fill of Home Assistant's select menu (its own
-                       component cannot carry a delete button on each line) */
-                    background: color-mix(in srgb, var(--disabled-color, #bdbdbd) 20%, transparent);
+                    background: none;
                     color: var(--primary-text-color);
                     border: none;
-                    border-radius: var(--ha-border-radius-lg, 12px);
+                    outline: none;
+                    border-radius: var(--feature-border-radius, var(--ha-border-radius-lg, 12px));
                     padding: 6px 10px;
+                    transition: box-shadow 180ms ease-in-out;
                     font: inherit;
                     font-size: var(--ha-font-size-m, 1rem);
                     font-weight: var(--ha-font-weight-normal, 400);
@@ -573,6 +581,17 @@ class OpenNeatoReplay extends HTMLElement {
                     line-height: 1.4;
                     cursor: pointer;
                 }
+                .picker::before {
+                    content: "";
+                    position: absolute;
+                    inset: 0;
+                    z-index: -1;
+                    background-color: var(--menu-fill);
+                    opacity: 0.2;
+                    transition: background-color 180ms ease-in-out;
+                }
+                .picker:hover { --menu-fill: var(--ha-color-on-neutral-quiet, var(--disabled-color)); }
+                .picker:focus-visible { box-shadow: 0 0 0 2px var(--feature-color, var(--secondary-text-color)); }
                 ha-dropdown::part(menu) {
                     min-width: var(--select-menu-width, 0);
                 }
@@ -2958,7 +2977,14 @@ const FEATURE_CSS = `
         display: flex; align-items: center; justify-content: center; gap: 6px; box-sizing: border-box;
     }
     .key.wide { flex: 1 1 40%; }
-    .choice { flex: 1 1 40%; min-width: 0; --control-select-menu-height: var(--feature-height, 42px); }
+    /* As Home Assistant's own tile features set up its select menu */
+    .choice {
+        flex: 1 1 40%; min-width: 0; box-sizing: border-box; display: block;
+        --control-select-menu-height: var(--feature-height);
+        --control-select-menu-border-radius: var(--feature-border-radius);
+        --control-select-menu-focus-color: var(--feature-color);
+        line-height: var(--ha-line-height-condensed);
+    }
     .key[aria-pressed="true"] { background: var(--primary-color); color: var(--text-primary-color, #fff); }
     .key:disabled { opacity: .5; cursor: default; }
     span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
