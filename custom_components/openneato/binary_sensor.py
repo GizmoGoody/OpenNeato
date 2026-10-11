@@ -202,6 +202,11 @@ class OpenNeatoBinarySensor(OpenNeatoEntity, BinarySensorEntity):
         value = section_data.get(self.entity_description.field)
         if value is None:
             return None
+        # The bridge reports the robot's alerts (UI_ALERT 201-242: returning to
+        # base, recovering location...) as hasError with kind "warning". They
+        # say what the robot is doing, not that something is wrong.
+        if self.entity_description.key == "error_has_error" and section_data.get("kind") == "warning":
+            return False
         return bool(value)
 
 
