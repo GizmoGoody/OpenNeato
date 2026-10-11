@@ -116,6 +116,7 @@
 
   /* ── the replay map (a tile feature) ─────────────────────────────────── */
 
+  const formatClockLike = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
   const hasReplay = () => source().includes('"openneato-replay"');
   const hasDateLabel = () => hasReplay() || source().includes("CLOCK_SET_MIN_EPOCH");
 
@@ -526,6 +527,47 @@
     expectEqual(el._selectedName, sessionNames(el)[2], "the clean picked by hand");
   });
 
+  test("map: the time so far sits just above the scrubber's marker", () => hasReplay() && source().includes("scrubwrap"), async () => {
+    clearStage();
+    const el = mountReplay();
+    await until(() => el._session && el._session.duration > 0, "the session to load");
+    const root = el.shadowRoot;
+    const tip = root.querySelector(".tip");
+    const scrub = root.querySelector(".scrub");
+    for (const fraction of [0, 0.5, 1]) {
+      el._seek(el._session.duration * fraction);
+      await sleep(50);
+      const t = tip.getBoundingClientRect();
+      const r = scrub.getBoundingClientRect();
+      // The marker is 14px wide and travels the track less its own width
+      const marker = r.left + 7 + fraction * (r.width - 14);
+      expect(Math.abs((t.left + t.width / 2) - marker) < 2, `at ${fraction}: the time is ${(t.left + t.width / 2) - marker}px off the marker`);
+      expect(t.bottom <= r.top + r.height / 2, `at ${fraction}: the time is not above the marker`);
+    }
+    expectEqual(tip.textContent, formatClockLike(el._time), "the time shown");
+  });
+
+  test("map: the rows around the map use the tile card's type, and follow its variables", hasReplay, async () => {
+    clearStage();
+    const el = mountReplay();
+    await until(() => el._session, "the session to load");
+    const stats = el.shadowRoot.querySelector(".stats");
+    const clock = el.shadowRoot.querySelector(".clock.total");
+    const probe = document.createElement("div");
+    probe.style.cssText = "font-size: var(--ha-font-size-s, 0.75rem)";
+    stage().append(probe);
+    const standard = getComputedStyle(probe).fontSize;
+    for (const node of [stats, clock]) {
+      const style = getComputedStyle(node);
+      expectEqual(style.fontSize, standard, "the size");
+      expectEqual(style.letterSpacing, "0.4px", "the letter spacing");
+    }
+    // A theme that sets the tile's variable changes these rows too
+    stage().style.setProperty("--ha-tile-info-secondary-font-size", "20px");
+    expectEqual(getComputedStyle(stats).fontSize, "20px", "the size under a theme");
+    stage().style.removeProperty("--ha-tile-info-secondary-font-size");
+  });
+
   test("speed: the button on the map remembers its choice for the next time", hasReplay, async () => {
     localStorage.removeItem("openneato-card:speed");
     clearStage();
@@ -691,19 +733,19 @@
     }
   });
 
-  test("card: the arrow is hidden unless asked for", () => hasCard() && source().includes("show_chevron"), async () => {
+  test("card: the chevron is hidden unless asked for", () => hasCard() && source().includes("show_chevron"), async () => {
     clearStage();
     forgetOpenState();
     const plain = mountCard({ entity: VACUUM, features: [REPLAY] });
     await tileReady(plain);
-    expect(!visible(chevron(plain)), "the arrow shows by default");
+    expect(!visible(chevron(plain)), "the chevron shows by default");
     const asked = mountCard({ entity: VACUUM, show_chevron: true, features: [REPLAY] });
     await tileReady(asked);
-    expect(visible(chevron(asked)), "the arrow is hidden when asked for");
+    expect(visible(chevron(asked)), "the chevron is hidden when asked for");
     expectEqual(Object.keys(asked._tile?._config ?? {}).includes("show_chevron"), false, "the tile card was given the option");
   });
 
-  test("card: the arrow opens and closes it too, and says which", hasCard, async () => {
+  test("card: the chevron opens and closes it too, and says which", hasCard, async () => {
     clearStage();
     forgetOpenState();
     const el = mountCard({ entity: VACUUM, show_chevron: true, features: [REPLAY] });
@@ -714,7 +756,7 @@
     await press(chevron(el));
     await until(() => !replayIn(el), "the replay to go");
     expectEqual(chevron(el).getAttribute("aria-expanded"), "false", "closed");
-    expect(chevron(el).getAttribute("aria-label"), "the arrow has no label");
+    expect(chevron(el).getAttribute("aria-label"), "the chevron has no label");
   });
 
   test("card: the choice is remembered, and Expanded on load only sets the start", hasCard, async () => {
@@ -749,13 +791,13 @@
     expect(tileText(el).includes("Test Robot"), "the tile does not show the robot");
   });
 
-  test("card: with no robot to find, it says so, and has no arrow", hasCard, async () => {
+  test("card: with no robot to find, it says so, and has no chevron", hasCard, async () => {
     clearStage();
     forgetOpenState();
     const el = mountCard({}, { ...hass(), entities: {} });
     await sleep(300);
     expect(visible(el.shadowRoot.querySelector(".notice")), "no notice");
-    expect(!visible(chevron(el)), "an arrow without a robot");
+    expect(!visible(chevron(el)), "a chevron without a robot");
   });
 
   test("card picker: a preview of a representative card, and no description", hasFeaturesList, async () => {
@@ -819,9 +861,15 @@
     await press(keyed(config, "stealth_led"));
     await until(() => keyed(config, "stealth_led").getAttribute("aria-pressed") === "false", "the switch to turn off");
     const choice = keyed(config, "navigation_mode");
-    expectEqual([...choice.options].map((o) => o.value), ["normal", "gentle", "deep"], "the choices");
-    choice.value = "gentle";
-    choice.dispatchEvent(new Event("change"));
+    if (choice.localName === "ha-dropdown") {
+      const items = [...choice.querySelectorAll("ha-dropdown-item")];
+      expectEqual(items.map((i) => i.value), ["normal", "gentle", "deep"], "the choices");
+      choice.dispatchEvent(new CustomEvent("wa-select", { detail: { item: items[1] } }));
+    } else {
+      expectEqual([...choice.options].map((o) => o.value), ["normal", "gentle", "deep"], "the choices");
+      choice.value = "gentle";
+      choice.dispatchEvent(new Event("change"));
+    }
     await until(() => hass().states["select.test_robot_navigation_mode"].state === "gentle", "the choice to change");
   });
 
@@ -904,18 +952,18 @@
     clearStage();
     const { el, saved, own } = await cardEditor(cardConfig);
     expectEqual(el.shadowRoot.querySelector('[slot="header"]').textContent.trim(), "OpenNeato", "the panel");
-    const arrow = source().includes("show_chevron");
-    expectEqual(names(own.schema), arrow ? ["expanded", "show_chevron"] : ["expanded"], "the card's own options");
+    const hasChevron = source().includes("show_chevron");
+    expectEqual(names(own.schema), hasChevron ? ["expanded", "show_chevron"] : ["expanded"], "the card's own options");
     expectEqual(own.computeLabel(own.schema[0]), "Expanded on load", "the label");
-    const off = arrow ? { show_chevron: false } : {};
+    const off = hasChevron ? { show_chevron: false } : {};
     own.dispatchEvent(new CustomEvent("value-changed", { detail: { value: { expanded: true } } }));
     expectEqual(last(saved), { ...cardConfig, expanded: true, ...off }, "on");
     own.dispatchEvent(new CustomEvent("value-changed", { detail: { value: { expanded: false } } }));
     expectEqual(last(saved), { ...cardConfig, expanded: false, ...off }, "off, and kept");
-    if (arrow) {
-      expectEqual(own.computeLabel(own.schema[1]), "Expand arrow", "the arrow's label");
+    if (hasChevron) {
+      expectEqual(own.computeLabel(own.schema[1]), "Chevron", "the chevron's label");
       own.dispatchEvent(new CustomEvent("value-changed", { detail: { value: { expanded: false, show_chevron: true } } }));
-      expectEqual(last(saved), { ...cardConfig, expanded: false, show_chevron: true }, "the arrow on");
+      expectEqual(last(saved), { ...cardConfig, expanded: false, show_chevron: true }, "the chevron on");
     }
   });
 
