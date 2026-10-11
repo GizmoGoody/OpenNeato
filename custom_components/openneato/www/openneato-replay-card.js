@@ -802,6 +802,7 @@ class OpenNeatoReplay extends HTMLElement {
                     flex: 1 1 auto;
                     width: 100%;
                     min-width: 0;
+                    margin: 0;
                     -webkit-appearance: none;
                     appearance: none;
                     height: 6px;
