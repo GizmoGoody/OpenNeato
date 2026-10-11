@@ -113,26 +113,37 @@ const DEFAULTS = {
 // The Replay map feature's options as written in YAML, with their defaults.
 // Options that belong together are nested.
 const REPLAY_DEFAULTS = {
-    header: { selector: true, distance: true, duration: true, battery: true, hide_labels: true },
+    header: { selector: true, area: true, distance: true, duration: true, battery: true, hide_labels: true },
     autoplay: false,
     units: "auto",
     height: 360,
     fit: "stable",
-    live_position: "bottom_right",
+    live_badge: { show: true, position: "bottom_right" },
+    alignment_badge: { show: true, position: "bottom_right" },
     rotation: { straighten: true, degrees: 0 },
     floorplan: { show: true, tiled: true, opacity: 1 },
     grid: true,
     coverage: { trail: true, tiled: true },
 };
 
-// The map corner the live badge sits in
-const LIVE_POSITIONS = ["top_left", "top_right", "bottom_left", "bottom_right"];
+// The alignment badge's word for each way a live clean can be lined up
+const ALIGNMENT_WORDS = { dock: "Dock", live: "Walls", previous: "Previous", none: "Unaligned" };
+const ALIGNMENT_TITLES = {
+    Dock: "Lined up on the dock",
+    Walls: "Lined up by matching the walls",
+    Previous: "Lined up as the last clean was, until this one has its own fit",
+    Unaligned: "Not lined up with the floorplan yet",
+};
+
+// The map corners a badge can sit in
+const CORNERS = ["top_left", "top_right", "bottom_left", "bottom_right"];
 
 // The YAML read into the flat values the drawing code uses
 function replayOptions(c = {}) {
     const g = (group, key) => c[group]?.[key] ?? REPLAY_DEFAULTS[group][key];
     return {
         show_picker: g("header", "selector"),
+        show_area: g("header", "area"),
         show_distance: g("header", "distance"),
         show_duration: g("header", "duration"),
         show_battery: g("header", "battery"),
@@ -141,7 +152,12 @@ function replayOptions(c = {}) {
         units: c.units ?? REPLAY_DEFAULTS.units,
         height: c.height ?? REPLAY_DEFAULTS.height,
         fit: c.fit ?? REPLAY_DEFAULTS.fit,
-        live_position: LIVE_POSITIONS.includes(c.live_position) ? c.live_position : REPLAY_DEFAULTS.live_position,
+        live_badge_show: g("live_badge", "show"),
+        live_badge_position: CORNERS.includes(c.live_badge?.position) ? c.live_badge.position : REPLAY_DEFAULTS.live_badge.position,
+        alignment_badge_show: g("alignment_badge", "show"),
+        alignment_badge_position: CORNERS.includes(c.alignment_badge?.position)
+            ? c.alignment_badge.position
+            : REPLAY_DEFAULTS.alignment_badge.position,
         straighten: g("rotation", "straighten"),
         rotation_degrees: Number(g("rotation", "degrees")) || 0,
         floorplan: g("floorplan", "show"),
@@ -600,6 +616,11 @@ class OpenNeatoReplay extends HTMLElement {
                     cursor: grab;
                 }
                 canvas.dragging { cursor: grabbing; }
+                /* The picture before an alignment change, faded out over the new one */
+                canvas.fade {
+                    pointer-events: none;
+                    opacity: 0;
+                }
                 .overlay {
                     position: absolute;
                     inset: 0;
@@ -679,35 +700,38 @@ class OpenNeatoReplay extends HTMLElement {
                     color: var(--live);
                     border: 1px solid var(--live);
                 }
-                /* The badge's corner is its wrapper's, so the badge's own
-                   redraws never move it; the same inset from both edges */
-                .livebox {
+                /* Each corner holds its badges side by side, the same inset
+                   from both edges; a badge's own redraws never move it */
+                .corner {
                     --inset: 8px;
                     position: absolute;
                     z-index: 1;
                     display: flex;
-                }
-                .livebox.top_left { top: var(--inset); left: var(--inset); }
-                .livebox.top_right { top: var(--inset); right: var(--inset); }
-                .livebox.bottom_left { bottom: var(--inset); left: var(--inset); }
-                .livebox.bottom_right { bottom: var(--inset); right: var(--inset); }
-                .livebox button.live {
-                    background: var(--card-background-color);
-                }
-                .livebox {
                     gap: 6px;
                     align-items: center;
                 }
-                /* Shown while a live clean is drawn with the last clean's
-                   alignment, until its own fit is ready */
-                .aligning {
+                .corner:empty { display: none; }
+                .corner.top_left { top: var(--inset); left: var(--inset); }
+                .corner.top_right { top: var(--inset); right: var(--inset); }
+                .corner.bottom_left { bottom: var(--inset); left: var(--inset); }
+                .corner.bottom_right { bottom: var(--inset); right: var(--inset); }
+                .corner button.live {
+                    background: var(--card-background-color);
+                }
+                /* How the live track is lined up, in one word; the Live chip's
+                   size and shape, in blue */
+                .method {
+                    --method: color-mix(in srgb, var(--info-color, #039be5) 75%, #000);
+                    display: inline-flex;
                     border-radius: 10px;
                     padding: 3px 8px;
+                    font: inherit;
                     font-size: 0.75rem;
                     line-height: 1.4;
                     white-space: nowrap;
                     color: #fff;
-                    background: color-mix(in srgb, var(--info-color, #039be5) 75%, #000);
+                    background: var(--method);
+                    border: 1px solid var(--method);
                 }
                 button.live.on {
                     background: var(--live);
@@ -785,7 +809,13 @@ class OpenNeatoReplay extends HTMLElement {
                 <div class="stage">
                     <canvas></canvas>
                     <div class="overlay">Loading…</div>
-                    <div class="livebox"><span class="aligning" hidden>Aligning</span><button class="live" hidden></button></div>
+                    <canvas class="fade" aria-hidden="true"></canvas>
+                    <div class="corner top_left"></div>
+                    <div class="corner top_right"></div>
+                    <div class="corner bottom_left"></div>
+                    <div class="corner bottom_right"></div>
+                    <span class="method" hidden></span>
+                    <button class="live" hidden></button>
                 </div>
                 <div class="controls">
                     <button class="play" title="Play/Pause" disabled>
@@ -817,8 +847,11 @@ class OpenNeatoReplay extends HTMLElement {
         this._totalEl = root.querySelector(".total");
         this._scrub = root.querySelector(".scrub");
         this._liveBtn = root.querySelector(".live");
-        this._aligningEl = root.querySelector(".aligning");
-        root.querySelector(".livebox").classList.add(this._config.live_position);
+        this._methodEl = root.querySelector(".method");
+        this._fadeCanvas = root.querySelector("canvas.fade");
+        // Each badge in its corner; sharing one, the method sits left of Live
+        root.querySelector(`.corner.${this._config.alignment_badge_position}`).append(this._methodEl);
+        root.querySelector(`.corner.${this._config.live_badge_position}`).append(this._liveBtn);
 
         this._stage.style.height = `${Number(this._config.height) || DEFAULTS.height}px`;
         this._picker.hidden = !this._config.show_picker;
@@ -868,6 +901,23 @@ class OpenNeatoReplay extends HTMLElement {
 
         this._bindGestures();
         this._observeResize();
+    }
+
+    // Lay the current picture over the canvas and fade it out, so a change of
+    // alignment during a live clean eases in instead of jumping
+    _fadeFrom() {
+        const fade = this._fadeCanvas;
+        const canvas = this._canvas;
+        if (!fade || !canvas || !canvas.width || !canvas.height) return;
+        fade.width = canvas.width;
+        fade.height = canvas.height;
+        fade.getContext("2d").drawImage(canvas, 0, 0);
+        fade.style.transition = "none";
+        fade.style.opacity = "1";
+        requestAnimationFrame(() => {
+            fade.style.transition = "opacity 0.4s ease";
+            fade.style.opacity = "0";
+        });
     }
 
     _observeResize() {
@@ -1278,7 +1328,12 @@ class OpenNeatoReplay extends HTMLElement {
         // backend is new enough; otherwise the list's flag stands.
         if (typeof raw.recording === "boolean" && !this._finalDue) this._setLive(raw.recording);
         // Still drawn with the last clean's alignment (or none, where there is a map to fit)
-        this._aligning = raw.alignment_source === "previous" || (raw.alignment_source === "none" && Boolean(raw.floorplan));
+        // How the track is lined up, for the alignment badge, and a fade rather
+        // than a jump when that changes during a live clean
+        this._alignWord = ALIGNMENT_WORDS[raw.alignment_source] ?? null;
+        const alignKey = JSON.stringify(raw.alignment ?? null);
+        if (!reset && this._session && this._live && alignKey !== this._alignKey) this._fadeFrom();
+        this._alignKey = alignKey;
         // Layers rebuild from the new arrays on the next frame. The view
         // transform is left alone, so pan and zoom survive a refresh.
         this._cov.sig = "";
@@ -1380,16 +1435,18 @@ class OpenNeatoReplay extends HTMLElement {
         if (!this._config.show_picker) {
             if (info.time) bits.push(`<span><b>${formatDate(info.time)}</b></span>`);
             bits.push(`<span>${modeLabel(info.mode)}</span>`);
-            if (!this._live && s.areaCovered) {
-                bits.push(figure("Area", formatArea(s.areaCovered, units, locale)));
-            }
         }
         if (this._live) {
             // Only what is known while recording: the summary (area,
             // distance, end battery) is written when the clean ends, so the
             // distance is worked out from the path so far.
             const since = (Date.now() - this._liveSince) / 1000;
-            // In the same order as after the clean: distance, duration, battery
+            // In the same order as after the clean: area, distance, duration,
+            // battery. The area so far is the cleaned cells times a cell's area.
+            if (show("show_area") && this._session.cellCount > 0) {
+                const cell = this._session.cellSize || DEFAULT_CELL_M;
+                bits.push(figure("Area", formatArea(this._session.cellCount * cell * cell, units, locale)));
+            }
             const travelled = this._session.pathLength();
             if (travelled > 0 && show("show_distance")) {
                 bits.push(figure("Distance", formatDistance(travelled, units, locale)));
@@ -1403,6 +1460,9 @@ class OpenNeatoReplay extends HTMLElement {
                 if (recharges > 0) bits.push(figure("Recharges", recharges));
             }
         } else {
+            if (s.areaCovered && show("show_area")) {
+                bits.push(figure("Area", formatArea(s.areaCovered, units, locale)));
+            }
             if (s.distanceTraveled && show("show_distance")) {
                 bits.push(figure("Distance", formatDistance(s.distanceTraveled, units, locale)));
             }
@@ -1451,8 +1511,15 @@ class OpenNeatoReplay extends HTMLElement {
         const chip = this._liveBtn;
         if (!chip) return;
         const show = this._live && Boolean(this._session);
-        chip.hidden = !show;
-        if (this._aligningEl) this._aligningEl.hidden = !(show && this._aligning);
+        chip.hidden = !show || !this._config.live_badge_show;
+        if (this._methodEl) {
+            const word = show && this._config.alignment_badge_show ? this._alignWord : null;
+            this._methodEl.hidden = !word;
+            if (word) {
+                this._methodEl.textContent = word;
+                this._methodEl.title = ALIGNMENT_TITLES[word];
+            }
+        }
         if (!show) {
             this._chipKey = null;
             return;
@@ -3016,6 +3083,18 @@ function tileConfigOf(config, entity, open) {
     return tile;
 }
 
+// The nearest element above that scrolls (through shadow roots), or null for the page
+function scrollParent(el) {
+    let node = el;
+    while (node) {
+        node = node.parentElement || node.getRootNode?.()?.host || null;
+        if (!node || node === document.documentElement) return null;
+        const overflow = getComputedStyle(node).overflowY;
+        if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight) return node;
+    }
+    return null;
+}
+
 class OpenNeatoCard extends HTMLElement {
     constructor() {
         super();
@@ -3133,12 +3212,33 @@ class OpenNeatoCard extends HTMLElement {
     _setOpen(open) {
         if (open === this._open) return;
         this._open = open;
+        // Keep the card where it is on screen while its height changes: the
+        // features appear (or go) over the next moment, and without this the
+        // dashboard can scroll away from the card
+        this._anchor = { top: this.getBoundingClientRect().top, until: performance.now() + 1500 };
+        this._watchSize();
         try {
             window.localStorage.setItem(this._storageKey, open ? "1" : "0");
         } catch (err) {
             // Storage can be unavailable (private windows); the card still works
         }
         this._apply();
+    }
+
+    _watchSize() {
+        if (this._sizeObserver) return;
+        this._sizeObserver = new ResizeObserver(() => this._keepInPlace());
+        this._sizeObserver.observe(this);
+    }
+
+    _keepInPlace() {
+        const anchor = this._anchor;
+        if (!anchor || performance.now() > anchor.until) return;
+        const moved = this.getBoundingClientRect().top - anchor.top;
+        if (Math.abs(moved) < 0.5) return;
+        const scroller = scrollParent(this);
+        if (scroller) scroller.scrollTop += moved;
+        else window.scrollBy(0, moved);
     }
 
     // The tile card, with its features only while the card is open: a closed
@@ -3187,6 +3287,7 @@ const toggle = (name, label, helper) => ({ name, label, ...(helper ? { helper } 
 // The Replay map's form fields, in order, and where each is kept in YAML
 const REPLAY_FIELDS = [
     ["selector", "header", "selector"],
+    ["area", "header", "area"],
     ["distance", "header", "distance"],
     ["duration", "header", "duration"],
     ["battery", "header", "battery"],
@@ -3195,7 +3296,10 @@ const REPLAY_FIELDS = [
     ["units", null, "units"],
     ["height", null, "height"],
     ["fit", null, "fit"],
-    ["live_position", null, "live_position"],
+    ["live_badge_show", "live_badge", "show"],
+    ["live_badge_position", "live_badge", "position"],
+    ["alignment_badge_show", "alignment_badge", "show"],
+    ["alignment_badge_position", "alignment_badge", "position"],
     ["straighten", "rotation", "straighten"],
     ["degrees", "rotation", "degrees"],
     ["floorplan", "floorplan", "show"],
@@ -3215,8 +3319,12 @@ const FEATURE_FORMS = {
         schema: (c) => {
             const floorplan = c.floorplan?.show ?? REPLAY_DEFAULTS.floorplan.show;
             const straighten = c.rotation?.straighten ?? REPLAY_DEFAULTS.rotation.straighten;
+            const liveBadge = c.live_badge?.show ?? REPLAY_DEFAULTS.live_badge.show;
+            const alignmentBadge = c.alignment_badge?.show ?? REPLAY_DEFAULTS.alignment_badge.show;
+            const corners = select([["top_left", "Top left"], ["top_right", "Top right"], ["bottom_left", "Bottom left"], ["bottom_right", "Bottom right"]]);
             return [
                 toggle("selector", "Session selector", "When hidden, the map shows the latest run, and follows a clean as it starts."),
+                toggle("area", "Area"),
                 toggle("distance", "Distance"),
                 toggle("duration", "Duration"),
                 toggle("battery", "Battery"),
@@ -3230,10 +3338,12 @@ const FEATURE_FORMS = {
                     name: "fit", label: "Framing", required: true,
                     selector: select([["stable", "Stable between cleanings"], ["plan", "Whole floorplan"], ["session", "This session only"]]),
                 },
-                {
-                    name: "live_position", label: "Live badge", required: true,
-                    selector: select([["top_left", "Top left"], ["top_right", "Top right"], ["bottom_left", "Bottom left"], ["bottom_right", "Bottom right"]]),
-                },
+                divider,
+                toggle("live_badge_show", "Live badge"),
+                ...(liveBadge ? [{ name: "live_badge_position", label: "Live badge corner", required: true, selector: corners }] : []),
+                divider,
+                toggle("alignment_badge_show", "Alignment badge", "During a clean, how the track is lined up: Dock, Walls, Previous or Unaligned."),
+                ...(alignmentBadge ? [{ name: "alignment_badge_position", label: "Alignment badge corner", required: true, selector: corners }] : []),
                 divider,
                 toggle("straighten", "Straighten against the walls"),
                 {

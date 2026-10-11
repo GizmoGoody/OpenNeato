@@ -185,6 +185,7 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
     - type: custom:openneato-replay
       header:
         selector: true
+        area: true
         distance: true
         duration: true
         battery: true
@@ -193,7 +194,12 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
       units: auto
       height: 360
       fit: stable
-      live_position: bottom_right
+      live_badge:
+        show: true
+        position: bottom_right
+      alignment_badge:
+        show: true
+        position: bottom_right
       rotation:
         straighten: true
         degrees: 0
@@ -225,12 +231,13 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
 
   | Replay map option | What it does |
   |---|---|
-  | `header` | The row above the map: the session `selector` (when hidden, the map shows the latest run and follows a clean as it starts), and the session's `distance`, `duration` and `battery`; `hide_labels` shows those figures without their names, which show on hover. |
+  | `header` | The row above the map: the session `selector` (when hidden, the map shows the latest run and follows a clean as it starts), and the session's `area`, `distance`, `duration` and `battery`, live and after the clean; `hide_labels` shows those figures without their names, which show on hover. |
   | `autoplay` | Play from the beginning as soon as a session loads. A session that is still recording is followed live instead. |
   | `units` | `auto` follows the Home Assistant unit system; `metric` or `us_customary` overrides it. |
   | `height` | Map height in px. |
   | `fit` | `stable` frames the cleaned area on a 1 m grid so the view stops shifting between cleanings; `plan` keeps the whole floorplan in view; `session` is the tightest fit. |
-  | `live_position` | The corner of the map the live badge sits in during a clean: `top_left`, `top_right`, `bottom_left` or `bottom_right`. |
+  | `live_badge` | The Live badge during a clean: `show`, and `position`, the corner of the map it sits in (`top_left`, `top_right`, `bottom_left` or `bottom_right`). |
+  | `alignment_badge` | During a clean, how the track is lined up on the floorplan, in one word: Dock (on the dock, where the clean started), Walls (by matching the walls), Previous (as the last clean was, until this one has its own fit) or Unaligned. `show` and `position` as for the Live badge; two badges in one corner sit side by side. |
   | `rotation` | `straighten` turns the map so the walls line up with the card, then turns it a quarter if that fills the card better; `degrees` is added to that angle. Without `straighten`, `degrees` is the map's angle. |
   | `floorplan` | The walls (the floorplan the integration builds from the robot's LIDAR): `show`, `tiled` (square tiles, as in the Neato app, or smooth), and `opacity` (`0` to `1`). |
   | `grid` | The half-metre background grid. |
