@@ -297,6 +297,7 @@ class LidarMapRunner:
             _LOGGER.info(
                 "LIDAR mapping: only %d captures, too thin to merge", len(captures)
             )
+            await self._save_stand_in(stand_in)
             return
 
         captures = self._drop_slow_scans(captures)
@@ -305,6 +306,7 @@ class LidarMapRunner:
                 "LIDAR mapping: only %d captures left after the rotation filter, "
                 "too thin to merge", len(captures),
             )
+            await self._save_stand_in(stand_in)
             return
 
         walls, floor = await self.hass.async_add_executor_job(
@@ -315,6 +317,7 @@ class LidarMapRunner:
         )
         self.last_report = report
         if report.get("rejected"):
+            await self._save_stand_in(stand_in)
             return
 
         await self._store.async_save(self._map.as_dict())
@@ -322,6 +325,15 @@ class LidarMapRunner:
             "LIDAR map updated: %d wall cells after %d cleanings",
             report.get("total_walls", 0), report.get("sessions", 0),
         )
+
+    async def _save_stand_in(self, stand_in: tuple[int, int, int] | None) -> None:
+        """Keep an unmerged run's stand-in alignment across restarts.
+
+        Without it the run is drawn in the robot's raw frame once Home
+        Assistant restarts, a quarter turn off the walls.
+        """
+        if stand_in and self._map is not None:
+            await self._store.async_save(self._map.as_dict())
 
     @staticmethod
     def _drop_slow_scans(captures: list) -> list:
@@ -379,6 +391,26 @@ class LidarMapRunner:
         if found is None and session_name.endswith(".hs"):
             found = self._map.alignments.get(session_name[: -len(".hs")])
         return found
+
+    def nearest_alignment(self, session_name: str) -> tuple[int, int, int] | None:
+        """The alignment of the nearest earlier clean, for a clean with none.
+
+        A clean too short to merge has no alignment of its own. The robot's
+        frame stays the same from clean to clean, so the clean before it is
+        a close stand-in, and much closer than the raw frame.
+        """
+        if not self._map or not self._map.alignments:
+            return None
+
+        def start(name: str) -> int:
+            digits = name.split(".", 1)[0]
+            return int(digits) if digits.isdigit() else -1
+
+        this = start(session_name)
+        earlier = [(start(name), align) for name, align in self._map.alignments.items() if 0 <= start(name) <= this]
+        if earlier:
+            return tuple(max(earlier, key=lambda item: item[0])[1])
+        return tuple(list(self._map.alignments.values())[-1])
 
     async def async_live_alignment(self, session_name: str) -> tuple[int, int, int] | None:
         """How the run being recorded fits the map so far, from its scans to date.

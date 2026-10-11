@@ -197,7 +197,7 @@ async def ws_get_session(
     # the map merges it a little later) was cached in the robot's frame: parse
     # it again now that its alignment is known.
     if cached is not None and runner is not None:
-        known = runner.alignment(name)
+        known = runner.alignment(name) or runner.nearest_alignment(name)
         if list(known or ()) != list(cached.get("alignment") or ()):
             cache.pop((entry_id, name), None)
             cached = None
@@ -235,6 +235,10 @@ async def ws_get_session(
     if align is None and runner is not None and was_recording:
         align = await runner.async_live_alignment(name)
         source = runner.live_alignment_source(name)
+    elif align is None and runner is not None:
+        # A finished clean that was never merged: the nearest earlier clean's
+        align = runner.nearest_alignment(name)
+        source = "previous" if align is not None else "none"
 
     # Coverage-grid construction is CPU-bound; keep it off the event loop.
     try:
