@@ -319,7 +319,7 @@
 
   test("stats: with the picker hidden, an unset clock still says Date unknown", hasDateLabel, async () => {
     clearStage();
-    const el = mountReplay({ header: { selector: false } });
+    const el = mountReplay({ show_picker: false, header: { selector: false } });
     await readyPicker(el);
     await el._selectSession("4020.jsonl");
     await until(() => statsText(el).includes("Date unknown"), "the stats row");
@@ -328,7 +328,7 @@
 
   test("stats: with the picker hidden, the map shows the latest run, and says which", hasReplay, async () => {
     clearStage();
-    const el = mountReplay({ header: { selector: false } });
+    const el = mountReplay({ show_picker: false, header: { selector: false } });
     await readyPicker(el);
     const newest = Number(sessionNames(el)[0].split(".")[0]);
     await until(() => statsText(el).includes(dateOf(newest)), "the newest run's date");
