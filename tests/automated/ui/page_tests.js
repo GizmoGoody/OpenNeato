@@ -242,7 +242,7 @@
         expect(text.includes(other), `${option}: false also hid ${other}: ${text}`);
       }
     }
-    const none = await shown({ header: { distance: false, duration: false, battery: false } });
+    const none = await shown({ header: { area: false, distance: false, duration: false, battery: false } });
     expectEqual(none, "", "the stats row with all three off");
   });
 
@@ -270,7 +270,7 @@
       el._setLive(true);
       el._renderChip();
       el._renderChip();
-      const badge = el.shadowRoot.querySelector(".stage .livebox button.live");
+      const badge = el.shadowRoot.querySelector(".stage .corner button.live");
       expect(badge && visible(badge), "the live badge does not show on the map");
       const b = badge.getBoundingClientRect();
       const m = el.shadowRoot.querySelector(".stage").getBoundingClientRect();
@@ -284,7 +284,7 @@
       el._setLive(false);
     };
     await corner({}, "bottom_right");
-    await corner({ live_position: "top_left" }, "top_left");
+    await corner({ live_badge: { position: "top_left" } }, "top_left");
   });
 
   test("map: on a narrow card the controls row stays inside the card", () => hasFeaturesList(), async () => {
@@ -305,7 +305,7 @@
 
   test("stats: the figures above the map are spaced evenly when they fit", () => hasFeaturesList(), async () => {
     clearStage();
-    const el = mountReplay({ header: { distance: false } });
+    const el = mountReplay({ header: { area: false, distance: false } });
     await until(() => el._session && el.shadowRoot.querySelectorAll(".stats span").length === 2, "the two figures");
     const row = el.shadowRoot.querySelector(".stats").getBoundingClientRect();
     const [one, two] = [...el.shadowRoot.querySelectorAll(".stats span")].map((s) => s.getBoundingClientRect());
@@ -317,14 +317,14 @@
     clearStage();
     const el = mountReplay();
     await until(() => el._session && statsNames(el).includes("Distance"), "the session to load");
-    const names = () => statsNames(el).split(" ").filter((w) => ["Distance", "Duration", "Battery"].includes(w));
+    const names = () => statsNames(el).split(" ").filter((w) => ["Area", "Distance", "Duration", "Battery"].includes(w));
     const after = names();
     el._setLive(true);
     el._renderStats();
     const live = names();
     el._setLive(false);
     expectEqual(live, after, "the figures' order, live and after");
-    expectEqual(live, ["Distance", "Duration", "Battery"], "the figures");
+    expectEqual(live, ["Area", "Distance", "Duration", "Battery"], "the figures");
   });
 
   test("map: a floorplan of black walls on a transparent background is found, for Whole floorplan", () => hasFeaturesList(), async () => {
@@ -348,20 +348,54 @@
     expectEqual([bounds.minX, bounds.maxX].map((v) => Math.round(v * 10) / 10), [1, 4], "the floorplan's width in metres");
   });
 
-  test("map: Aligning shows beside Live while the live clean uses the last clean's alignment", () => hasFeaturesList() && source().includes("aligning"), async () => {
+  test("map: the alignment badge says in one word how the live track is lined up, the Live badge's size", () => hasFeaturesList() && source().includes("ALIGNMENT_WORDS"), async () => {
     clearStage();
     const el = mountReplay();
     await until(() => el._session, "the session to load");
-    const aligning = el.shadowRoot.querySelector(".livebox .aligning");
+    const method = el.shadowRoot.querySelector(".stage .corner .method");
+    const live = el.shadowRoot.querySelector(".stage .corner button.live");
     el._setLive(true);
-    el._aligning = true;
-    el._renderChip();
-    expect(visible(aligning), "Aligning does not show");
-    expectEqual(aligning.textContent.trim(), "Aligning", "the badge's text");
-    el._aligning = false;
-    el._renderChip();
-    expect(!visible(aligning), "Aligning still shows once aligned");
+    for (const [source, word] of [["dock", "Dock"], ["live", "Walls"], ["previous", "Previous"], ["none", "Unaligned"]]) {
+      el._alignWord = { dock: "Dock", live: "Walls", previous: "Previous", none: "Unaligned" }[source];
+      el._renderChip();
+      expect(visible(method), `no badge for ${source}`);
+      expectEqual(method.textContent.trim(), word, `the word for ${source}`);
+    }
+    const [m, l] = [method, live].map((b) => b.getBoundingClientRect());
+    expect(Math.abs(m.height - l.height) < 1, `heights differ: ${m.height} and ${l.height}`);
+    expectEqual(method.parentElement, live.parentElement, "both in the bottom-right corner by default, side by side");
     el._setLive(false);
+    el._renderChip();
+    expect(!visible(method), "the badge shows after the clean");
+  });
+
+  test("map: each badge has its own corner and can be hidden", () => hasFeaturesList() && source().includes("ALIGNMENT_WORDS"), async () => {
+    clearStage();
+    const el = mountReplay({ live_badge: { position: "top_right" }, alignment_badge: { position: "bottom_left" } });
+    await until(() => el._session, "the session to load");
+    expect(el.shadowRoot.querySelector(".corner.top_right button.live"), "the Live badge is not top right");
+    expect(el.shadowRoot.querySelector(".corner.bottom_left .method"), "the alignment badge is not bottom left");
+    clearStage();
+    const hidden = mountReplay({ live_badge: { show: false }, alignment_badge: { show: false } });
+    await until(() => hidden._session, "the session to load");
+    hidden._setLive(true);
+    hidden._alignWord = "Dock";
+    hidden._renderChip();
+    expect(!visible(hidden.shadowRoot.querySelector("button.live")), "the Live badge shows when hidden");
+    expect(!visible(hidden.shadowRoot.querySelector(".method")), "the alignment badge shows when hidden");
+    hidden._setLive(false);
+  });
+
+  test("map: a change of alignment during a live clean fades in", () => hasFeaturesList() && source().includes("_fadeFrom"), async () => {
+    clearStage();
+    const el = mountReplay();
+    await until(() => el._session && el._canvas.width > 0, "the map to draw");
+    el._fadeFrom();
+    const fade = el.shadowRoot.querySelector("canvas.fade");
+    expectEqual([fade.width, fade.height], [el._canvas.width, el._canvas.height], "the old picture's size");
+    await sleep(100);
+    expectEqual(fade.style.opacity, "0", "fading out");
+    expect(fade.style.transition.includes("opacity"), "no fade");
   });
 
   test("picker: unless a session was picked by hand, the card follows the newest clean", () => hasFeaturesList() && source().includes("this._userPicked && listed"), async () => {
@@ -517,6 +551,24 @@
     const calls = openneatoCalls();
     await sleep(1500);
     expectEqual(openneatoCalls(), calls, "calls to the integration while closed");
+  });
+
+  test("card: it keeps its place on screen while it opens or closes", () => hasFeaturesList() && source().includes("_keepInPlace"), async () => {
+    clearStage();
+    forgetOpenState();
+    const spacer = document.createElement("div");
+    spacer.style.height = "3000px";
+    stage().append(spacer);
+    const el = mountCard({ entity: VACUUM, features: [REPLAY] });
+    await tileReady(el);
+    window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY - 200);
+    await sleep(100);
+    const before = el.getBoundingClientRect().top;
+    // As the dashboard does when it lays out again: the card is pushed down
+    el._anchor = { top: before, until: performance.now() + 1500 };
+    spacer.style.height = "3150px";
+    await until(() => Math.abs(el.getBoundingClientRect().top - before) < 1, "the card back in its place");
+    window.scrollTo(0, 0);
   });
 
   test("card: the arrow opens and closes it too, and says which", hasCard, async () => {
@@ -761,7 +813,8 @@
     clearStage();
     const { form } = await featureEditor(REPLAY);
     expectEqual(names(form.schema), [
-      "selector", "distance", "duration", "battery", "hide_labels", "autoplay", "units", "height", "fit", "live_position", "straighten", "degrees",
+      "selector", "area", "distance", "duration", "battery", "hide_labels", "autoplay", "units", "height", "fit",
+      "live_badge_show", "live_badge_position", "alignment_badge_show", "alignment_badge_position", "straighten", "degrees",
       "floorplan", "floorplan_tiled", "floorplan_opacity", "grid", "trail", "coverage_tiled",
     ], "the fields");
     const label = (name) => form.computeLabel(flat(form.schema).find((i) => i.name === name));
@@ -797,7 +850,8 @@
     clearStage();
     const { form } = await featureEditor(REPLAY);
     const layout = flat(form.schema).map((i) => (i.type === "divider" ? "|" : i.name)).join(" ");
-    expectEqual(layout, "selector distance duration battery hide_labels | autoplay units height fit live_position | straighten degrees | "
+    expectEqual(layout, "selector area distance duration battery hide_labels | autoplay units height fit | "
+      + "live_badge_show live_badge_position | alignment_badge_show alignment_badge_position | straighten degrees | "
       + "floorplan floorplan_tiled floorplan_opacity | grid | trail coverage_tiled", "the fields and dividers");
     await until(() => form.shadowRoot?.querySelector("ha-form-divider"), "a divider on the form");
   });
