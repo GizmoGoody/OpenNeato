@@ -861,7 +861,11 @@
     await press(keyed(config, "stealth_led"));
     await until(() => keyed(config, "stealth_led").getAttribute("aria-pressed") === "false", "the switch to turn off");
     const choice = keyed(config, "navigation_mode");
-    if (choice.localName === "ha-dropdown") {
+    if (choice.localName === "ha-control-select-menu") {
+      expectEqual(choice.options.map((o) => o.value), ["normal", "gentle", "deep"], "the choices");
+      expect(choice.hasAttribute("show-arrow"), "no caret");
+      choice.dispatchEvent(new CustomEvent("wa-select", { detail: { item: { value: "gentle" } } }));
+    } else if (choice.localName === "ha-dropdown") {
       const items = [...choice.querySelectorAll("ha-dropdown-item")];
       expectEqual(items.map((i) => i.value), ["normal", "gentle", "deep"], "the choices");
       choice.dispatchEvent(new CustomEvent("wa-select", { detail: { item: items[1] } }));
