@@ -90,8 +90,11 @@ class OpenNeatoVacuum(OpenNeatoEntity, StateVacuumEntity):
         charger_data = self.coordinator.data.get("charger", {})
         error_data = self.coordinator.data.get("error", {})
 
-        # Error takes priority
-        if error_data.get("hasError"):
+        # A real error takes priority. The bridge reports the robot's alerts
+        # (UI_ALERT 201-242: returning to base, recovering location...) the same
+        # way, with kind "warning"; those say what the robot is doing, so the
+        # activity below stands. Older firmware without kind counts as an error.
+        if error_data.get("hasError") and error_data.get("kind", "error") != "warning":
             return VacuumActivity.ERROR
 
         ui_state = state_data.get("uiState", "")
