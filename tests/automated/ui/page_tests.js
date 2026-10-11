@@ -539,8 +539,8 @@
       await sleep(50);
       const t = tip.getBoundingClientRect();
       const r = scrub.getBoundingClientRect();
-      // The marker is 14px wide and travels the track less its own width
-      const marker = r.left + 7 + fraction * (r.width - 14);
+      // The marker is 18px wide and travels the track less its own width
+      const marker = r.left + 9 + fraction * (r.width - 18);
       expect(Math.abs((t.left + t.width / 2) - marker) < 2, `at ${fraction}: the time is ${(t.left + t.width / 2) - marker}px off the marker`);
       expect(t.bottom <= r.top + r.height / 2, `at ${fraction}: the time is not above the marker`);
     }
