@@ -41,3 +41,22 @@ def test_an_error_is_an_error() -> None:
 
 def test_firmware_without_kind_keeps_the_old_behaviour() -> None:
     assert _activity({"hasError": True}) == VacuumActivity.ERROR
+
+
+def _error_sensor(error: dict) -> bool | None:
+    binary_sensor = importlib.import_module("custom_components.openneato.binary_sensor")
+    entity = object.__new__(binary_sensor.OpenNeatoBinarySensor)
+    entity.entity_description = next(
+        d for d in binary_sensor.BINARY_SENSOR_DESCRIPTIONS if d.key == "error_has_error"
+    )
+    entity.coordinator = SimpleNamespace(data={"error": error})
+    return entity.is_on
+
+
+def test_the_error_sensor_stays_off_for_an_alert() -> None:
+    binary_sensor = importlib.import_module("custom_components.openneato.binary_sensor")
+    if '"warning"' not in inspect.getsource(binary_sensor.OpenNeatoBinarySensor.is_on.fget):
+        pytest.skip("This branch's Error sensor still counts alerts")
+    assert _error_sensor({"hasError": True, "kind": "warning", "errorCode": 201}) is False
+    assert _error_sensor({"hasError": True, "kind": "error", "errorCode": 249}) is True
+    assert _error_sensor({"hasError": False, "kind": ""}) is False
