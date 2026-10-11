@@ -29,6 +29,7 @@ from .lidar_mapper import (
     MERGE_MIN_OVERLAP,
     plan_calibration,
     AccumulatedMap,
+    anchored_alignment,
     best_alignment,
     run_key,
     build_session_grids,
@@ -56,6 +57,9 @@ MIN_CAPTURES = 60            # below this a run is too thin to be worth merging
 # and then at most this often, since fitting is CPU-bound.
 LIVE_ALIGN_MIN_CAPTURES = 20
 LIVE_ALIGN_EVERY = 60.0      # seconds
+# A new live fit replaces the one in use only when it fits better by this much,
+# so the track does not hop between near-equal answers during a clean
+LIVE_ALIGN_SWITCH_MARGIN = 0.05
 BYTES_PER_POSE = 48          # firmware writes ~48 bytes per snapshot, every 2 s
 MAX_INTERVAL = 12.0
 
@@ -102,7 +106,13 @@ class LidarMapRunner:
         # The clean's own fit so far, and the starting guess until it has one
         # (the last merged clean's alignment; the robot's frame stays the same
         # from clean to clean)
-        self._fit: tuple[int, int, int] | None = None
+        self._fit: tuple[float, ...] | None = None
+        self._fit_score = 0.0
+        self._fit_source = "live"
+        # Whether the robot was on the dock (external power) just before the
+        # clean started: its zero is then the dock, which anchors the shift
+        self._on_power = False
+        self._started_docked = False
         self._guess: tuple[int, int, int] | None = None
         self._fit_at = 0.0
         self._fitting = False
@@ -132,6 +142,9 @@ class LidarMapRunner:
     def _handle_update(self) -> None:
         state = ((self.coordinator.data or {}).get("state") or {}).get("uiState", "")
         cleaning = any(s in state for s in CLEANING)
+        if not cleaning:
+            charger = (self.coordinator.data or {}).get("charger") or {}
+            self._on_power = bool(charger.get("extPwrPresent"))
         if cleaning and not self._collecting:
             self._start()
         elif not cleaning and self._collecting:
@@ -150,6 +163,8 @@ class LidarMapRunner:
         # ends the robot has stopped reporting it as recording.
         self._session_name = (self._health_ref or {}).get("name")
         self._fit = None
+        self._fit_score = 0.0
+        self._started_docked = self._on_power
         self._fit_at = 0.0
         self._guess = self._map.latest_merged() if self._map else None
         self._start_timer()
@@ -220,6 +235,12 @@ class LidarMapRunner:
                 self._captures.append(
                     (x, y, theta, points, float(payload.get("rotationSpeed") or 0.0))
                 )
+                if len(self._captures) == 1:
+                    # Near (0, 0) when the robot's zero is the dock
+                    _LOGGER.debug(
+                        "LIDAR mapping: first pose of %s is (%.2f, %.2f) m, %.0f deg; started docked: %s",
+                        self._session_name, x, y, theta, self._started_docked,
+                    )
         except Exception as err:  # noqa: BLE001 -- one bad read must never end a run
             _LOGGER.debug("LIDAR mapping: sample failed (%s)", err)
         finally:
@@ -251,17 +272,30 @@ class LidarMapRunner:
             walls, _floor = await self.hass.async_add_executor_job(
                 build_session_grids, [c[:4] for c in captures]
             )
-            quarter, dx, dy, overlap = await self.hass.async_add_executor_job(
-                best_alignment, walls, self._map.walls, self._guess
-            )
+            dock = self._map.dock_shift() if self._started_docked else None
+            if dock is not None:
+                quarter, dx, dy, deg, overlap = await self.hass.async_add_executor_job(
+                    anchored_alignment, walls, self._map.walls, dock, self._guess
+                )
+                source = "dock"
+            else:
+                quarter, dx, dy, overlap = await self.hass.async_add_executor_job(
+                    best_alignment, walls, self._map.walls, self._guess
+                )
+                deg, source = 0.0, "live"
         finally:
             self._fitting = False
         _LOGGER.debug(
-            "LIDAR mapping: live fit of %s is %d deg and (%d, %d) cells, %.0f%% overlap",
-            self._session_name, quarter * 90, dx, dy, 100 * overlap,
+            "LIDAR mapping: live fit of %s (%s) is %.1f deg and (%d, %d) cells, %.0f%% overlap",
+            self._session_name, source, quarter * 90 + deg, dx, dy, 100 * overlap,
         )
-        if overlap >= MERGE_MIN_OVERLAP and self._collecting:
-            self._fit = (quarter, dx, dy)
+        if overlap < MERGE_MIN_OVERLAP or not self._collecting:
+            return
+        # The first fit is taken; after that only one that fits clearly better
+        if self._fit is None or overlap >= self._fit_score + LIVE_ALIGN_SWITCH_MARGIN:
+            self._fit = (quarter, dx, dy, deg)
+            self._fit_score = overlap
+            self._fit_source = source
 
     def _recording_session(self) -> dict[str, Any] | None:
         for item in (self.coordinator.data or {}).get("history") or ():
@@ -340,7 +374,7 @@ class LidarMapRunner:
             build_session_grids, [c[:4] for c in captures]
         )
         report = await self.hass.async_add_executor_job(
-            self._map.merge_session, walls, floor, self._session_name, self._guess
+            self._map.merge_session, walls, floor, self._session_name, self._guess, self._started_docked
         )
         self.last_report = report
         if report.get("rejected"):
@@ -411,7 +445,12 @@ class LidarMapRunner:
             return own
         if recording and self._collecting and self._session_name and run_key(session_name) == run_key(self._session_name):
             if self._fit:
-                return self._fit, "live"
+                return self._fit, self._fit_source
+            # Before its own fit: anchored on the dock, with the last clean's turn
+            dock = self._map.dock_shift() if self._started_docked else None
+            if dock is not None:
+                quarter = int(self._guess[0]) if self._guess else 0
+                return (quarter, round(dock[0]), round(dock[1]), 0.0), "dock"
         latest = self._map.latest_merged()
         return (latest, "previous") if latest else (None, "none")
 

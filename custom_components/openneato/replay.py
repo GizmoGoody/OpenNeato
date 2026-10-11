@@ -157,7 +157,7 @@ def build_replay_session(
     #
     # Applied here, before bounds, coverage and recharges are derived, so all
     # of them come out in the corrected frame without each needing to know.
-    if align and any(align):
+    if align and any(align):  # (quarter, dx, dy) or (quarter, dx, dy, deg)
         norm = _apply_alignment(norm, align)
 
     recharges = _pair_recharges(raw_recharges, norm, t_origin)
@@ -262,11 +262,14 @@ def _apply_alignment(
 ) -> list[tuple[float, float, float, float]]:
     """Rotate and shift a run onto the accumulated map's frame.
 
-    `align` is (quarter, dx, dy) exactly as align_to_reference() returned it:
-    quarter turns counter-clockwise, then a shift in *cells*.
+    `align` is (quarter, dx, dy) or (quarter, dx, dy, deg): quarter turns
+    counter-clockwise, then a small turn of deg degrees, both about the
+    robot's zero, then a shift in *cells* (see lidar_mapper.transform_cells).
     """
-    quarter, dx, dy = align
+    quarter, dx, dy = int(align[0]), align[1], align[2]
+    deg = float(align[3]) if len(align) > 3 else 0.0
     quarter %= 4
+    cos_d, sin_d = math.cos(math.radians(deg)), math.sin(math.radians(deg))
     shift_x = dx * HISTORY_CELL_SIZE_M
     shift_y = dy * HISTORY_CELL_SIZE_M
     out = []
@@ -277,7 +280,9 @@ def _apply_alignment(
             x, y = -x, -y
         elif quarter == 3:
             x, y = y, -x
-        out.append((x + shift_x, y + shift_y, (t + quarter * 90.0) % 360.0, ts))
+        if deg:
+            x, y = x * cos_d - y * sin_d, x * sin_d + y * cos_d
+        out.append((x + shift_x, y + shift_y, (t + quarter * 90.0 + deg) % 360.0, ts))
     return out
 
 

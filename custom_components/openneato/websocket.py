@@ -247,6 +247,7 @@ async def ws_get_session(
     # Which alignment the run is drawn with, so the card can say while a live
     # clean is still settling (see LidarMapRunner.resolve)
     parsed["alignment_source"] = source
+    parsed["alignment"] = list(align) if align else None
 
     # Evaluated now rather than before the fetch: the session may have
     # completed while we were downloading it, and the flag the card gets
@@ -263,7 +264,7 @@ async def ws_get_session(
         if not was_recording:
             if len(cache) >= _CACHE_MAX:
                 cache.pop(next(iter(cache)))
-            cache[(entry_id, name)] = {**parsed, "alignment": list(align) if align else None}
+            cache[(entry_id, name)] = parsed
 
     connection.send_result(
         msg["id"],
