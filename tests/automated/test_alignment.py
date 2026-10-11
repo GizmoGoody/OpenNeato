@@ -18,6 +18,7 @@ from homeassistant.core import HomeAssistant
 lidar_runner = importlib.import_module("custom_components.openneato.lidar_runner")
 lidar_mapper = importlib.import_module("custom_components.openneato.lidar_mapper")
 websocket = importlib.import_module("custom_components.openneato.websocket")
+replay = importlib.import_module("custom_components.openneato.replay")
 
 if not hasattr(lidar_runner.LidarMapRunner, "resolve"):
     pytest.skip("This branch has no single alignment decision", allow_module_level=True)
@@ -98,7 +99,7 @@ def test_a_merge_prefers_the_fit_near_the_last_merged_alignment() -> None:
     stored.sessions = 1
     with patch.object(lidar_mapper, "align_to_reference", lambda new, ref: (0, 17, 39, 0.99)):
         stored.merge_session(TURNED, set(), NAME, (1, -6, -3))
-    assert stored.alignment_of(NAME + ".hs") == ((1, 0, 0), "merged")
+    assert stored.alignment_of(NAME + ".hs") == ((1, 0, 0, 0.0), "merged")
 
 
 async def test_a_recording_clean_is_fitted_by_the_mappers_own_timer(hass: HomeAssistant) -> None:
@@ -110,7 +111,71 @@ async def test_a_recording_clean_is_fitted_by_the_mappers_own_timer(hass: HomeAs
         assert runner._fit is None, "fitted before enough scans"
         runner._captures.append((0.0, 0.0, 0.0, [], 5.0))
         await runner._async_fit()
-    assert runner._fit == (1, 0, 0)
+    assert runner._fit == (1, 0, 0, 0.0)
+
+
+# ── the dock ────────────────────────────────────────────────────────────
+
+BIG_ROOM = {(x * 3 + i, y * 3 + j): n for (x, y), n in ROOM.items() for i in range(3) for j in range(3)}
+
+
+def test_the_dock_is_learnt_only_from_cleans_that_started_on_it() -> None:
+    stored = lidar_mapper.AccumulatedMap({})
+    stored.walls = dict(ROOM)
+    stored.sessions = 1
+    stored.merge_session(TURNED, set(), "1.jsonl", (1, 0, 0), docked=False)
+    assert stored.dock is None
+    stored.merge_session(TURNED, set(), "2.jsonl", (1, 0, 0), docked=True)
+    assert stored.dock is not None and stored.dock["n"] == 1
+    assert lidar_mapper.AccumulatedMap(stored.as_dict()).dock == stored.dock, "saved with the map"
+
+
+def test_before_a_docked_start_the_merged_shifts_stand_in_for_the_dock() -> None:
+    stored = lidar_mapper.AccumulatedMap({"alignments": {"a": [1, -2, -1], "b": [1, -6, -3]}})
+    assert stored.dock_shift() == (-4.0, -2.0)
+    stored.learn_dock(1.0, 2.0)
+    assert stored.dock_shift() == (1.0, 2.0)
+
+
+def test_an_anchored_fit_takes_the_shift_from_the_dock_and_finds_a_small_turn() -> None:
+    """The walls decide the quarter turn and a small turn; the dock, the shift."""
+    c, s = __import__("math").cos(__import__("math").radians(-2.0)), __import__("math").sin(__import__("math").radians(-2.0))
+    tilted = {(round(x * c - y * s), round(x * s + y * c)): n for (x, y), n in BIG_ROOM.items()}
+    seen = {cell: 1 for cell in lidar_mapper._rotate_cells(tilted, 3)}
+    quarter, dx, dy, deg, overlap = lidar_mapper.anchored_alignment(seen, BIG_ROOM, (0.2, -0.3), (1, 0, 0))
+    assert (quarter, dx, dy) == (1, 0, 0), "the quarter turn, and the dock's shift"
+    assert deg in (1.5, 2.0, 2.5), f"the small turn found: {deg}"
+    assert overlap > 0.8
+
+
+def test_a_small_turn_is_applied_to_the_replay() -> None:
+    (x, y, t, ts), = replay._apply_alignment([(1.0, 0.0, 0.0, 5.0)], (0, 0, 0, 90.0))
+    assert abs(x) < 1e-9 and abs(y - 1.0) < 1e-9 and t == 90.0 and ts == 5.0
+
+
+async def test_a_docked_clean_is_drawn_on_the_dock_before_its_own_fit(hass: HomeAssistant) -> None:
+    runner = _runner(hass, {"1791669270.jsonl": [1, -6, -3], "1791667002.jsonl": [1, -2, -1]})
+    runner._on_power = True
+    _recording(runner)
+    assert runner._started_docked
+    assert runner.resolve(NAME, recording=True) == ((1, -4, -2, 0.0), "dock")
+
+
+async def test_a_new_live_fit_replaces_the_old_only_when_clearly_better(hass: HomeAssistant) -> None:
+    runner = _runner(hass, {"1791669270.jsonl": [1, -6, -3]})
+    _recording(runner)
+    runner._captures = [(0.0, 0.0, 0.0, [], 5.0)] * lidar_runner.LIVE_ALIGN_MIN_CAPTURES
+    fits = iter([(1, 0, 0, 0.90), (1, 5, 5, 0.93), (1, 7, 7, 0.97)])
+    with (
+        patch.object(lidar_runner, "build_session_grids", lambda captures: (TURNED, set())),
+        patch.object(lidar_runner, "best_alignment", lambda *args: next(fits)),
+    ):
+        await runner._async_fit()
+        assert runner._fit == (1, 0, 0, 0.0)
+        await runner._async_fit()
+        assert runner._fit == (1, 0, 0, 0.0), "replaced by a fit only 3 points better"
+        await runner._async_fit()
+        assert runner._fit == (1, 7, 7, 0.0), "kept a fit 7 points better out"
 
 
 # ── what a replay is drawn with ─────────────────────────────────────────
@@ -159,7 +224,7 @@ async def test_a_merged_clean_replaces_its_fit_with_the_merge(hass: HomeAssistan
     runner._captures = [(0.0, 0.0, 0.0, [], 5.0)] * lidar_runner.MIN_CAPTURES
     with patch.object(lidar_runner, "build_session_grids", lambda captures: (TURNED, set())):
         await runner._finish()
-    assert runner.resolve(NAME + ".hs") == ((1, 0, 0), "merged")
+    assert runner.resolve(NAME + ".hs") == ((1, 0, 0, 0.0), "merged")
 
 
 # ── the replay's WebSocket command ──────────────────────────────────────
