@@ -29,6 +29,7 @@ from homeassistant.components import websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant
 from homeassistant.core import ServiceCall
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
@@ -105,7 +106,11 @@ def _session(item: dict[str, Any]) -> dict[str, Any]:
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "openneato/sessions", vol.Optional("entry_id"): str}
+    {
+        vol.Required("type"): "openneato/sessions",
+        vol.Optional("entry_id"): str,
+        vol.Optional("entity_id"): cv.entity_id,
+    }
 )
 @websocket_api.async_response
 async def _fake_sessions(
@@ -120,7 +125,12 @@ async def _fake_sessions(
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "openneato/session", vol.Required("name"): str, vol.Optional("entry_id"): str}
+    {
+        vol.Required("type"): "openneato/session",
+        vol.Required("name"): str,
+        vol.Optional("entry_id"): str,
+        vol.Optional("entity_id"): cv.entity_id,
+    }
 )
 @websocket_api.async_response
 async def _fake_session(
