@@ -16,6 +16,8 @@ import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CONF_MAP_ROTATION_OFFSET,
@@ -48,21 +50,74 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_delete_session)
 
 
-def _resolve_entry(hass: HomeAssistant, entry_id: str | None) -> tuple[str, dict[str, Any]] | None:
-    """Return (entry_id, entry_data) for the requested or only OpenNeato entry."""
+class RobotNotFound(Exception):
+    """Which robot a command meant could not be decided; the message says why."""
+
+
+def _robots(hass: HomeAssistant) -> dict[str, dict[str, Any]]:
+    """The set-up robots, by config entry id."""
     entries: dict[str, Any] = hass.data.get(DOMAIN, {})
     # hass.data[DOMAIN] also holds our own module-level scratch keys.
-    candidates = {
+    return {
         key: value
         for key, value in entries.items()
         if isinstance(value, dict) and "api" in value
     }
-    if entry_id:
-        data = candidates.get(entry_id)
-        return (entry_id, data) if data else None
-    if len(candidates) == 1:
-        return next(iter(candidates.items()))
+
+
+def _vacuum_entity(hass: HomeAssistant, entry_id: str) -> str | None:
+    """The vacuum entity of a robot, which is how a card names it."""
+    registry = er.async_get(hass)
+    for entity in er.async_entries_for_config_entry(registry, entry_id):
+        if entity.domain == "vacuum":
+            return entity.entity_id
     return None
+
+
+def _choices(hass: HomeAssistant, robots: dict[str, dict[str, Any]]) -> str:
+    """One line per robot, so the card's error says what to put in its config."""
+    lines = []
+    for entry_id in robots:
+        entry = hass.config_entries.async_get_entry(entry_id)
+        title = entry.title if entry else entry_id
+        vacuum = _vacuum_entity(hass, entry_id)
+        lines.append(f"{title}: entity {vacuum or '(no vacuum entity)'}, entry_id {entry_id}")
+    return "\n".join(lines)
+
+
+def _resolve_entry(
+    hass: HomeAssistant, entry_id: str | None, entity_id: str | None = None
+) -> tuple[str, dict[str, Any]]:
+    """Return (entry_id, entry_data) for the robot a command is about.
+
+    A card names its robot by the vacuum entity (`entity`), or by config entry
+    id (`entry_id`, kept for older cards). With one robot neither is needed;
+    with several and neither given, the error lists them (issue #23).
+    """
+    robots = _robots(hass)
+    if entity_id:
+        entity = er.async_get(hass).async_get(entity_id)
+        found = entity.config_entry_id if entity else None
+        if found not in robots:
+            raise RobotNotFound(
+                f"{entity_id} is not an OpenNeato robot. Set entity to one of:\n{_choices(hass, robots)}"
+            )
+        return found, robots[found]
+    if entry_id:
+        data = robots.get(entry_id)
+        if data is None:
+            raise RobotNotFound(
+                f"No OpenNeato config entry {entry_id}. Set entity to one of:\n{_choices(hass, robots)}"
+            )
+        return entry_id, data
+    if not robots:
+        raise RobotNotFound("No OpenNeato robot is set up")
+    if len(robots) == 1:
+        return next(iter(robots.items()))
+    raise RobotNotFound(
+        "Several OpenNeato robots are set up. Set entity to the robot's vacuum entity, one of:\n"
+        + _choices(hass, robots)
+    )
 
 
 def _floorplan_payload(hass: HomeAssistant, entry_id: str) -> dict[str, Any] | None:
@@ -110,6 +165,7 @@ def _floorplan_payload(hass: HomeAssistant, entry_id: str) -> dict[str, Any] | N
     {
         vol.Required("type"): "openneato/sessions",
         vol.Optional("entry_id"): str,
+        vol.Optional("entity_id"): cv.entity_id,
     }
 )
 @websocket_api.async_response
@@ -119,11 +175,11 @@ async def ws_list_sessions(
     msg: dict[str, Any],
 ) -> None:
     """List the robot's cleaning sessions, newest first."""
-    resolved = _resolve_entry(hass, msg.get("entry_id"))
-    if resolved is None:
-        connection.send_error(msg["id"], "not_found", "No OpenNeato config entry found")
+    try:
+        entry_id, data = _resolve_entry(hass, msg.get("entry_id"), msg.get("entity_id"))
+    except RobotNotFound as err:
+        connection.send_error(msg["id"], "not_found", str(err))
         return
-    entry_id, data = resolved
 
     coordinator = data["coordinator"]
     history = (coordinator.data or {}).get("history")
@@ -172,6 +228,7 @@ def _session_start(session: dict[str, Any]) -> float:
         vol.Required("type"): "openneato/session",
         vol.Required("name"): str,
         vol.Optional("entry_id"): str,
+        vol.Optional("entity_id"): cv.entity_id,
     }
 )
 @websocket_api.async_response
@@ -181,11 +238,11 @@ async def ws_get_session(
     msg: dict[str, Any],
 ) -> None:
     """Download and parse one cleaning session for playback."""
-    resolved = _resolve_entry(hass, msg.get("entry_id"))
-    if resolved is None:
-        connection.send_error(msg["id"], "not_found", "No OpenNeato config entry found")
+    try:
+        entry_id, data = _resolve_entry(hass, msg.get("entry_id"), msg.get("entity_id"))
+    except RobotNotFound as err:
+        connection.send_error(msg["id"], "not_found", str(err))
         return
-    entry_id, data = resolved
     name = msg["name"]
     coordinator = data["coordinator"]
 
@@ -277,6 +334,7 @@ async def ws_get_session(
         vol.Required("type"): "openneato/delete_session",
         vol.Required("name"): str,
         vol.Optional("entry_id"): str,
+        vol.Optional("entity_id"): cv.entity_id,
     }
 )
 @websocket_api.async_response
@@ -296,11 +354,11 @@ async def ws_delete_session(
     are indistinguishable from every other session's. Deleting a bad session
     stops it being replayed; it does not un-draw its walls.
     """
-    resolved = _resolve_entry(hass, msg.get("entry_id"))
-    if resolved is None:
-        connection.send_error(msg["id"], "not_found", "No OpenNeato config entry found")
+    try:
+        entry_id, data = _resolve_entry(hass, msg.get("entry_id"), msg.get("entity_id"))
+    except RobotNotFound as err:
+        connection.send_error(msg["id"], "not_found", str(err))
         return
-    entry_id, data = resolved
     name = msg["name"]
 
     # Refuse while the robot is still writing to it: the firmware would be

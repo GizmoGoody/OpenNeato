@@ -152,6 +152,8 @@ function replayOptions(c = {}) {
         show_duration: g("header", "duration"),
         show_battery: g("header", "battery"),
         hide_labels: g("header", "hide_labels"),
+        speed: c.speed ?? DEFAULTS.speed,
+        session: c.session ?? "latest",
         autoplay: c.autoplay ?? REPLAY_DEFAULTS.autoplay,
         units: c.units ?? REPLAY_DEFAULTS.units,
         height: c.height ?? REPLAY_DEFAULTS.height,
@@ -170,6 +172,7 @@ function replayOptions(c = {}) {
         grid_lines: c.grid ?? REPLAY_DEFAULTS.grid,
         trail: g("coverage", "trail"),
         tiled_coverage: g("coverage", "tiled"),
+        ...(c.entity_id ? { entity_id: c.entity_id } : {}),
         ...(c.entry_id ? { entry_id: c.entry_id } : {}),
     };
 }
@@ -453,8 +456,9 @@ class OpenNeatoReplay extends HTMLElement {
 
     setConfig(config) {
         this._config = { ...DEFAULTS, ...replayOptions(config) };
-        this._speed = this._storedSpeed();
-        this._selectedName = null;
+        this._speed = this._storedSpeed(this._config.speed);
+        this._pinnedSession = this._config.session && this._config.session !== "latest" ? this._config.session : null;
+        this._selectedName = this._pinnedSession;
         this._look = {
             lines: this._config.grid_lines !== false,
             plan: this._config.tiled_plan !== false,
@@ -1131,6 +1135,16 @@ class OpenNeatoReplay extends HTMLElement {
         return (hass && hass.locale && hass.locale.language) || navigator.language;
     }
 
+    // Which robot the websocket is asked about. An entity or entry id written
+    // in the feature's own options wins over the entity the feature sits under,
+    // since the person chose it; with neither, the tile's robot is the one.
+    _target() {
+        if (this._config.entity_id) return { entity_id: this._config.entity_id };
+        if (this._config.entry_id) return { entry_id: this._config.entry_id };
+        const entityId = this._context?.entity_id;
+        return entityId ? { entity_id: entityId } : {};
+    }
+
     async _loadSessions() {
         if (this._sessionsLoading || !this._hass) return;
         this._sessionsLoading = true;
@@ -1138,7 +1152,7 @@ class OpenNeatoReplay extends HTMLElement {
         try {
             const res = await this._hass.callWS({
                 type: "openneato/sessions",
-                ...(this._config.entry_id ? { entry_id: this._config.entry_id } : {}),
+                ...this._target(),
             });
             this._entryId = res.entry_id;
             this._sessions = res.sessions || [];
@@ -1175,6 +1189,22 @@ class OpenNeatoReplay extends HTMLElement {
         const listed = (name) => Boolean(name) && this._sessions.some((s) => s.name === name);
         const live = this._sessions.find((s) => s.recording);
         const liveName = live ? live.name : null;
+        if (this._pinnedSession) {
+            if (!listed(this._pinnedSession)) {
+                this._clearSelection();
+                this._fail(`Could not find session\n${this._pinnedSession}`);
+                return;
+            }
+            const pinnedRecording = this._sessions.find((s) => s.name === this._pinnedSession)?.recording;
+            if (this._selectedName !== this._pinnedSession || !this._session) {
+                await this._selectSession(this._pinnedSession);
+            } else if (this._live && !pinnedRecording) {
+                this._finalDue = true;
+                this._setLive(false);
+                await this._refreshLive();
+            }
+            return;
+        }
         // A *new* clean lifts a manual pick: the card switches to a clean as it
         // starts, and the pick only ever meant "leave me on what I chose while
         // this one runs". Caveat: a list that briefly
@@ -1223,7 +1253,7 @@ class OpenNeatoReplay extends HTMLElement {
             await this._hass.callWS({
                 type: "openneato/delete_session",
                 name,
-                ...(this._entryId ? { entry_id: this._entryId } : {}),
+                ...this._target(),
             });
         } catch (err) {
             if (err && err.code === "recording") {
@@ -1313,7 +1343,7 @@ class OpenNeatoReplay extends HTMLElement {
         return this._hass.callWS({
             type: "openneato/session",
             name,
-            ...(this._entryId ? { entry_id: this._entryId } : {}),
+            ...this._target(),
         });
     }
 
@@ -1707,14 +1737,16 @@ class OpenNeatoReplay extends HTMLElement {
     // step above it.
     // The speed picked with the button on the map is remembered in this browser,
     // so it is not an option of the card
-    _storedSpeed() {
+    _storedSpeed(seed = DEFAULTS.speed) {
         try {
-            const value = Number(window.localStorage.getItem(SPEED_STORAGE_KEY));
+            const stored = window.localStorage.getItem(SPEED_STORAGE_KEY);
+            if (stored === null) return Number(seed) > 0 ? Number(seed) : DEFAULTS.speed;
+            const value = Number(stored);
             if (SPEED_STEPS.includes(value)) return value;
         } catch (err) {
             // Storage can be unavailable (private windows); the default stands
         }
-        return DEFAULTS.speed;
+        return Number(seed) > 0 ? Number(seed) : DEFAULTS.speed;
     }
 
     _cycleSpeed() {
@@ -2859,6 +2891,16 @@ function robots(hass) {
         .sort();
 }
 
+// The robot set up by a config entry: its device lists the entry. Older cards
+// named a robot this way (entry_id), before the card took an entity.
+function robotOfEntry(hass, entryId) {
+    if (!entryId) return undefined;
+    return robots(hass).find((id) => {
+        const device = hass.devices?.[hass.entities?.[id]?.device_id];
+        return Array.isArray(device?.config_entries) && device.config_entries.includes(entryId);
+    });
+}
+
 // The other entities of the robot's device, in the domains given
 function siblings(hass, entityId, domains) {
     const deviceId = hass?.entities?.[entityId]?.device_id;
@@ -3716,6 +3758,122 @@ class OpenNeatoCardEditor extends HTMLElement {
     }
 }
 
+function legacyUnits(units) {
+    return units === "imperial" ? "us_customary" : units;
+}
+
+function legacyReplayConfig(config) {
+    const rotation = config.rotation === "auto" || config.rotation === undefined
+        ? { straighten: true, degrees: 0 }
+        : { straighten: false, degrees: Number(config.rotation) || 0 };
+    const showStats = config.show_stats !== false;
+    return {
+        type: `custom:${CARD_TYPE}`,
+        ...(config.entity ? { entity: config.entity } : {}),
+        name: config.title ?? "Cleaning replay",
+        features: [{
+            type: `custom:${REPLAY_TYPE}`,
+            header: {
+                selector: config.show_picker !== false,
+                area: showStats,
+                distance: showStats,
+                duration: showStats,
+                battery: showStats,
+                hide_labels: false,
+            },
+            ...(config.entry_id && !config.entity ? { entry_id: config.entry_id } : {}),
+            ...(config.session ? { session: config.session } : {}),
+            ...(config.speed !== undefined ? { speed: config.speed } : {}),
+            ...(config.autoplay !== undefined ? { autoplay: config.autoplay } : {}),
+            ...(config.units !== undefined ? { units: legacyUnits(config.units) } : {}),
+            ...(config.height !== undefined ? { height: config.height } : {}),
+            ...(config.fit !== undefined ? { fit: config.fit } : {}),
+            rotation,
+            floorplan: {
+                show: config.floorplan !== false,
+                tiled: config.tiled_plan ?? config.floorplan_tiled ?? config.grid !== false,
+                opacity: config.floorplan_opacity ?? 1,
+            },
+            grid: config.grid_lines ?? config.grid ?? true,
+            coverage: {
+                trail: config.trail !== false,
+                tiled: config.tiled_coverage ?? config.grid !== false,
+            },
+        }],
+    };
+}
+
+class OpenNeatoLegacyReplayCard extends HTMLElement {
+    constructor() {
+        super();
+        this.attachShadow({ mode: "open" });
+        this._card = document.createElement(CARD_TYPE);
+        this.shadowRoot.append(this._card);
+    }
+
+    static getStubConfig() {
+        return { type: "custom:openneato-replay-card" };
+    }
+
+    setConfig(config) {
+        if (!config) throw new Error("Invalid configuration");
+        this._legacy = config;
+        this._lookup = null;
+        this._applied = null;
+        this._applyLegacy();
+    }
+
+    set hass(hass) {
+        this._hass = hass;
+        this._applyLegacy();
+        this._card.hass = hass;
+    }
+
+    // The wrapped card is configured once the robot is known. An old
+    // multi-robot card names it by entry_id, which the registries turn into
+    // the vacuum entity once hass is here; until then (or if the entry is
+    // unknown) the feature keeps the entry_id, so the map is right even while
+    // the tile is not. The card is reconfigured only when the answer changes.
+    _applyLegacy() {
+        const legacy = this._legacy;
+        if (!legacy) return;
+        const entity = legacy.entity || this._entryEntity();
+        const applied = { legacy, entity: entity || "" };
+        if (this._applied && this._applied.legacy === applied.legacy && this._applied.entity === applied.entity) return;
+        this._applied = applied;
+        this._card.setConfig(legacyReplayConfig(entity ? { ...legacy, entity } : legacy));
+    }
+
+    // The registries are new objects only when they change, so an entry that
+    // was not found is not looked for again until they do
+    _entryEntity() {
+        const hass = this._hass;
+        const entryId = this._legacy?.entry_id;
+        if (!hass || !entryId) return undefined;
+        const seen = this._lookup;
+        if (seen && seen.entities === hass.entities && seen.devices === hass.devices) return seen.entity;
+        const entity = robotOfEntry(hass, entryId);
+        this._lookup = { entities: hass.entities, devices: hass.devices, entity };
+        return entity;
+    }
+
+    set preview(value) {
+        this._card.preview = value;
+    }
+
+    set layout(value) {
+        this._card.layout = value;
+    }
+
+    getCardSize() {
+        return this._card.getCardSize();
+    }
+
+    getGridOptions() {
+        return this._card.getGridOptions();
+    }
+}
+
 /* ── registration ────────────────────────────────────────────────────── */
 
 for (const [tag, cls] of [
@@ -3726,6 +3884,7 @@ for (const [tag, cls] of [
     [FEATURE_EDITOR_TYPE, OpenNeatoFeatureEditor],
     [CARD_EDITOR_TYPE, OpenNeatoCardEditor],
     [CARD_TYPE, OpenNeatoCard],
+    ["openneato-replay-card", OpenNeatoLegacyReplayCard],
 ]) {
     if (!customElements.get(tag)) customElements.define(tag, cls);
 }
@@ -3747,6 +3906,14 @@ for (const feature of [
 window.customCards = window.customCards || [];
 if (!window.customCards.some((card) => card.type === CARD_TYPE)) {
     window.customCards.push({ type: CARD_TYPE, name: "OpenNeato", preview: true });
+}
+if (!window.customCards.some((card) => card.type === "openneato-replay-card")) {
+    window.customCards.push({
+        type: "openneato-replay-card",
+        name: "OpenNeato Replay (legacy)",
+        description: "Compatibility card for existing OpenNeato replay dashboards.",
+        preview: false,
+    });
 }
 
 console.info(

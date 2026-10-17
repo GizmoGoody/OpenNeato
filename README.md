@@ -148,9 +148,11 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
 ### Notes for setup
 
 - **Installing the map card** — nothing to install: the integration serves the card itself and
-  adds it to the dashboard resources on startup, even while the robot is offline (so the card and its
-  WebSocket API can never fall out of version sync). Just add the *OpenNeato* card to any dashboard.
-  If the dashboards are in YAML mode, the card is loaded on every page instead. If registration ever fails (see the log), add `/openneato_static/openneato-replay-card.js` as a
+  registers it with the frontend on startup, including dashboard resources when available and while the
+  robot is offline (so the card and its WebSocket API can never fall out of version sync). Just add
+  the *OpenNeato* card to any dashboard.
+  If the dashboards are in YAML mode or auto-registration ever fails (see the log), add
+  `/openneato_static/openneato-replay-card.js` as a
   JavaScript-module resource manually. The walls come from the integration's own LIDAR mapper, which
   accumulates an occupancy grid across cleanings — the plan sharpens with each run.
 - **The card** — add *OpenNeato* from the card picker. A tap on the card shows or hides its
@@ -244,7 +246,7 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
   | `floorplan` | The walls (the floorplan the integration builds from the robot's LIDAR): `show`, `tiled` (square tiles, as in the Neato app, or smooth), and `opacity` (`0` to `1`). |
   | `grid` | The half-metre background grid. |
   | `coverage` | The cleaned area: `trail` (the fading track behind the robot), and `tiled` (coverage and trail as square tiles, or smooth). |
-  | `entry_id` | Which OpenNeato config entry to read when there is more than one robot. |
+  | `entry_id` | The robot to read by config entry id, for older dashboards. Normally left out, so the feature follows the robot of the tile it sits in; when set, it wins over the tile's robot. |
 
   Controls `items` are the vacuum's commands. Suction `fan_speeds` are the levels to show (all of them
   when it is left out). Configuration `items` are the robot's switches and choices by key; Eco mode and
@@ -254,6 +256,16 @@ sensor states) are tagged so they cluster cleanly under HA's Diagnostic section.
   only the date and time of the session on screen while it is closed, and the full line for every
   session while its list is open. A session recorded before the bridge had the real time (NTP not
   synced, and no robot clock) shows as *Date unknown*. Check *NTP synced* on the bridge's device.
+- **Migrating the old replay card** — existing `type: custom:openneato-replay-card` dashboards remain
+  supported by a compatibility shim and do not need to be rewritten. New dashboards should use
+  `custom:openneato-card` with the `custom:openneato-replay` feature. The old `title` becomes the tile's
+  `name`; `entity` selects the tile vacuum, and an old `entry_id` is resolved to that robot's vacuum
+  entity, so a multi-robot dashboard keeps showing the robot it named. `session`, including a pinned
+  historical session, `speed`, `autoplay`, `fit`, `rotation`, `floorplan*`, `grid*`, `trail`, `units`,
+  `show_picker`, and `show_stats` are translated to the replay feature. Legacy `imperial` units become
+  Home Assistant's `us_customary`; a legacy `height: fill` has no exact tile-feature equivalent and uses
+  the replay feature's normal pixel height. The legacy card does not expose the new tile card's visual
+  editor or wrapper options. The shim may be removed only in a future major release.
 - **Reading the diagnostics** — two field names are misleading and the integration corrects for them:
   `errorCode` returns **200** (`UI_ALERT_INVALID`) when nothing is wrong, so the *Error code* sensor
   reports *unknown* instead; and `chargerMAH` / `dischargeMAH` are **milliamps, not milliamp-hours**
