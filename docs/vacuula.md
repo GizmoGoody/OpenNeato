@@ -99,8 +99,9 @@ received archive, so send it again with `force=1` if that is what you want.
   undisturbed, and it captures whatever the robot prints on the debug UART instead. Commands already queued are
   failed when the window opens and closes, so a scheduled clean cannot fire late into the install, and new
   commands fail fast instead of waiting. The web UI and the Home Assistant integration show the robot as
-  unavailable meanwhile. The script re-arms the window for fifteen minutes right before provisioning;
-  `POST /api/vacuula/resume` ends it early.
+  unavailable meanwhile. The script re-arms the window for about twenty-two minutes right before joining the
+  robot's setup network (its own timeouts for that network, the provisioning and the console tail, plus a
+  margin for the reboot); `POST /api/vacuula/resume` ends it early.
 - **Two controllers.** Once Vacuula is installed, both it and OpenNeato can start and stop cleaning. Decide
   which one owns scheduling: the bridge's scheduler and the robot's own schedule (managed by Vacuula) will both
   fire if you set both.

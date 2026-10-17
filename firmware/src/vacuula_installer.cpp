@@ -180,6 +180,13 @@ void VacuulaInstaller::start(bool reset, bool force, std::function<void(bool, co
         {
             Locked guard(lock);
             startPending = false;
+            // Take the archive out first: a refused start discards it (the caller
+            // re-posts, with force=1 if that is what it wants), so a 64 KB buffer
+            // never lingers on a gate failure.
+            data.swap(archive);
+            receiveDone = false;
+            receiveOwner = nullptr;
+            expectedBytes = 0;
             if (!ok) {
                 callback(false, "robot did not answer GetVersion");
                 return;
@@ -201,10 +208,6 @@ void VacuulaInstaller::start(bool reset, bool force, std::function<void(bool, co
                 callback(false, "SKey not ready yet, cannot reset the network");
                 return;
             }
-            data.swap(archive);
-            receiveDone = false;
-            receiveOwner = nullptr;
-            expectedBytes = 0;
         }
 
         resetRequested = reset;
