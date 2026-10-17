@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import argparse
 import getpass
-import http.client
 import io
 import json
 import os
@@ -40,6 +39,7 @@ import tarfile
 import time
 import urllib.error
 import urllib.request
+from http.client import HTTPException
 from typing import NoReturn
 
 # vacuula/installer commit whose Gen3 scripts this flow was written against.
@@ -89,7 +89,7 @@ def http(url: str, method: str = "GET", data: bytes | None = None, headers: dict
             return resp.status, resp.read()
     except urllib.error.HTTPError as e:
         return e.code, e.read()
-    except (urllib.error.URLError, http.client.HTTPException, OSError, ssl.SSLError) as e:
+    except (urllib.error.URLError, HTTPException, OSError, ssl.SSLError) as e:
         raise Unreachable(f"{url}: {e}") from e
 
 
