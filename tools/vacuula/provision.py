@@ -165,6 +165,21 @@ def fetch_scripts(ref: str, scripts_dir: str | None) -> dict[str, bytes]:
     return files
 
 
+def adapt_scripts_for_uart(scripts: dict[str, bytes]) -> dict[str, bytes]:
+    """Vacuula's scripts assume the installer is plugged into the robot's USB port and
+    write their milestones to /dev/serusb1; under `set -e` a missing USB device node
+    kills init.sh on its very first line. Send those writes to the debug UART instead,
+    which is where the bridge listens anyway."""
+    out = {}
+    for name, data in scripts.items():
+        patched = data.replace(b"/dev/serusb1", b"/dev/ser1")
+        n = data.count(b"/dev/serusb1")
+        if n:
+            log(f"{name}: {n} USB console write(s) redirected to the debug UART")
+        out[name] = patched
+    return out
+
+
 def build_archive(scripts: dict[str, bytes], cert: str, server_ip: str) -> bytes:
     """Same layout as Vacuula's installer: scripts, cert.pem and a two-line config
     (server IP, then a nip.io name for it) at the archive root."""
@@ -287,6 +302,31 @@ def wait_for_robot_ap(ctx: ssl.SSLContext) -> dict:
     fail("the robot's setup network never became reachable")
 
 
+def robot_scan(ctx: ssl.SSLContext, ssid: str) -> None:
+    """Ask the robot which networks it sees and how it classifies the target one.
+    Gen3 robots only do 2.4 GHz WPA2; a network they flag as WPA3 or do not list
+    cannot be joined whatever the password."""
+    try:
+        status, nets = http_json(f"{ROBOT_AP_URL}/wifi_networks", headers=ROBOT_AP_HEADERS, timeout=45, ctx=ctx)
+    except Unreachable as e:
+        log(f"robot network scan unavailable ({e}); continuing")
+        return
+    if status != 200 or not isinstance(nets, list):
+        log(f"robot network scan answered {status}: {str(nets)[:200]}; continuing")
+        return
+    mine = [n for n in nets if isinstance(n, dict) and n.get("ssid") == ssid]
+    others = sorted({n.get("ssid") for n in nets if isinstance(n, dict) and n.get("ssid")})
+    log(f"Robot sees {len(nets)} network(s): {', '.join(others)[:300]}")
+    if not mine:
+        log(f"WARNING: the robot does not see {ssid!r} at all (2.4 GHz only, WPA2 only)")
+        return
+    for n in mine:
+        log(f"  {ssid!r} as seen by the robot: {json.dumps(n)[:300]}")
+        text = json.dumps(n).lower()
+        if "wpa3" in text or "sae" in text:
+            log("WARNING: the robot classifies this network as WPA3; Gen3 robots cannot join WPA3 networks")
+
+
 def provision_robot(ctx: ssl.SSLContext, mac: str, ssid: str, password: str) -> None:
     body = {
         "name": f"gen3-{mac}",
@@ -315,6 +355,7 @@ def provision_robot(ctx: ssl.SSLContext, mac: str, ssid: str, password: str) -> 
 def follow_robot_progress(ctx: ssl.SSLContext) -> None:
     deadline = time.time() + PROVISION_TIMEOUT_S
     last_step = 0
+    last_snapshot = ""
     failures = 0
     while time.time() < deadline:
         time.sleep(3)
@@ -331,13 +372,20 @@ def follow_robot_progress(ctx: ssl.SSLContext) -> None:
         if not isinstance(step, int):
             failures += 1
             if failures >= 5:
-                log("Setup network stopped answering; the robot has moved on")
+                log("Setup network stopped answering (the robot either moved to your WiFi or gave up)")
                 return
             continue
         failures = 0
+        snapshot = json.dumps(data, sort_keys=True)
+        if snapshot != last_snapshot:
+            last_snapshot = snapshot
+            log(f"  robot progress: {snapshot[:300]}")
         if step != last_step:
             last_step = step
             log(f"  robot: step {step} ({ROBOT_PROGRESS_STEPS.get(step, '?')})")
+        err = data.get("error") or data.get("status") if isinstance(data, dict) else None
+        if isinstance(err, str) and err and err.lower() not in ("ok", "success", "in_progress", "running"):
+            log(f"The robot reported a problem at step {step}: {err}")
         if step >= 4:
             return
     log("No more progress reports from the setup network; moving on")
@@ -420,6 +468,7 @@ def main() -> int:
     p.add_argument("--server-port", type=int, default=80, help="Vacuula web/API port (default 80)")
     p.add_argument("--ssid", help="home WiFi network the robot should join")
     p.add_argument("--password", help="home WiFi password (prompted if omitted)")
+    p.add_argument("--password-file", help="read the home WiFi password from this file (first line) instead")
     p.add_argument("--no-reset", action="store_true", help="upload only; do not reset the robot's WiFi")
     p.add_argument("--force", action="store_true", help="skip the model/firmware gate on the bridge")
     p.add_argument("--scripts-ref", default=SCRIPTS_REF, help="vacuula/installer git ref for the Gen3 scripts")
@@ -437,7 +486,7 @@ def main() -> int:
 
     _, cert = check_server(server_base)
     robots_before = server_robots(server_base)
-    scripts = fetch_scripts(args.scripts_ref, args.scripts_dir)
+    scripts = adapt_scripts_for_uart(fetch_scripts(args.scripts_ref, args.scripts_dir))
     archive = build_archive(scripts, cert, args.server)
     if args.archive_out:
         try:
@@ -464,7 +513,19 @@ def main() -> int:
     ssid = args.ssid or input("Home WiFi network name (SSID): ").strip()
     if not ssid:
         fail("an SSID is required")
-    password = args.password if args.password is not None else getpass.getpass("Home WiFi password: ")
+    if args.password_file:
+        try:
+            with open(args.password_file, "r", encoding="utf-8") as f:
+                password = f.readline().rstrip('\r\n')
+        except OSError as e:
+            fail(f"cannot read {args.password_file}: {e}")
+    elif args.password is not None:
+        password = args.password
+    else:
+        password = getpass.getpass("Home WiFi password: ")
+    if not password:
+        fail("the WiFi password came out empty")
+    log(f"WiFi password: {len(password)} characters (not shown)")
 
     # Re-arm the bridge's quiet window now, while this computer is still on the home
     # network: joining the robot's setup network may cut the path to the bridge.
@@ -472,6 +533,7 @@ def main() -> int:
     rearm_quiet(bridge, QUIET_REARM_MS)
     ctx = robot_ap_context()
     wait_for_robot_ap(ctx)
+    robot_scan(ctx, ssid)
     provision_robot(ctx, mac, ssid, password)
     follow_robot_progress(ctx)
     verdict = tail_console(bridge, log_since, trust_sticky=reset_this_run)

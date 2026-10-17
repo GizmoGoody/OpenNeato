@@ -60,7 +60,18 @@ by rebooting the robot, which also reboots the bridge (it is powered from the ro
 lines can stop early. Expect the whole run to take five to ten minutes.
 
 `--no-reset` uploads only, `--skip-provision` stops after the reset, `--archive-out` keeps a copy of the
-archive, `--scripts-dir` uses local copies of Vacuula's scripts, `--force` bypasses the model/firmware gate.
+archive, `--scripts-dir` uses local copies of Vacuula's scripts, `--force` bypasses the model/firmware gate,
+`--password-file` reads the WiFi password from a file (the prompt is easy to mis-paste). On Windows,
+`tools/vacuula/run_handover.ps1` wraps the script and joins the robot's setup network with the PC's own
+Wi-Fi adapter when asked, so Ethernet keeps the bridge reachable throughout.
+
+**At the end the robot switches itself off.** Vacuula's install script finishes with a shutdown. Press the
+robot's button to turn it on again; it then rejoins your WiFi and shows up on the Vacuula server within a
+minute or two (the script keeps waiting for that for ten minutes).
+
+One difference from Vacuula's own installer: their scripts write their first line to the robot's USB console
+and die there when no USB cable is attached. The archive built here sends those writes to the debug UART
+instead, which is also what lets the bridge show the whole install as it runs.
 
 ## Bridge endpoints
 
@@ -98,5 +109,13 @@ received archive, so send it again with `force=1` if that is what you want.
   poll right after the robot boots rather than a broken bridge.
 - **Internet dependencies.** The robot still reaches `pool.ntp.org` for time and checks `8.8.8.8` for
   connectivity; see Vacuula's FAQ.
+- **A robot that will not join.** If the robot reaches "joining WiFi" and then goes quiet with its WiFi
+  reported off (`GetWifiStatus` through `/api/serial` shows `Enabled, no`, `Wifi Mode, off`, and the reset
+  command answers "not allowed"), its WiFi stack is wedged. Restart the robot with `POST /api/power?action=restart`
+  and run the script again; the saved credentials survive and the robot rejoins on its own.
+- **Secrets on the console.** Vacuula's script prints the robot's settings database on the console, including
+  the robot's cloud secret. The bridge keeps those lines in memory until its next network reset or reboot;
+  the runner does not print them, but `GET /api/vacuula/log` does. Restart the bridge after a successful
+  hand-over if that matters to you.
 - **Licensing.** Vacuula is AGPL-3.0. The script downloads its shell scripts at run time and bundles them into
   the archive for your robot; nothing from Vacuula is vendored into this MIT repository.
