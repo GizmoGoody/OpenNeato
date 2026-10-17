@@ -61,6 +61,8 @@ std::vector<Field> VacuulaStatus::toFields() const {
             {"quiet", quiet ? "true" : "false", FIELD_BOOL},
             {"quietRemainingMs", String(quietRemainingMs), FIELD_INT},
             {"logNext", String(logNext), FIELD_INT},
+            {"installDone", installDone ? "true" : "false", FIELD_BOOL},
+            {"installFailed", installFailed ? "true" : "false", FIELD_BOOL},
     };
 }
 
@@ -244,6 +246,8 @@ bool VacuulaInstaller::sendReset() {
         {
             Locked guard(lock);
             logLines.clear();
+            installDone = false;
+            installFailed = false;
         }
         neato.pauseQueue(VACUULA_QUIET_MS);
         dataLogger.logGenericEvent("vacuula", {{"event", "network_reset", FIELD_STRING}});
@@ -305,6 +309,8 @@ void VacuulaInstaller::fillStatus(VacuulaStatus& s) const {
     s.quiet = neato.isQueuePaused();
     s.quietRemainingMs = static_cast<int>(neato.queuePausedRemainingMs());
     s.logNext = static_cast<int>(logNext);
+    s.installDone = installDone;
+    s.installFailed = installFailed;
 }
 
 void VacuulaInstaller::getStatus(std::function<void(bool, const VacuulaStatus&)> callback) {
@@ -334,6 +340,13 @@ void VacuulaInstaller::onConsoleLine(const String& line) {
     logLines.push_back({logNext++, line});
     while (logLines.size() > VACUULA_LOG_MAX_LINES)
         logLines.erase(logLines.begin());
+    // Sticky markers from Vacuula's init.sh / vacuula.sh, so the verdict survives
+    // the ring buffer rolling over before the PC side reads it.
+    if (line.indexOf("Initialization complete") >= 0 || line.indexOf("Rebooting") >= 0)
+        installDone = true;
+    if (line.indexOf("vacuula-installer-failed") >= 0 || line.indexOf("Failed to set") >= 0 ||
+        line.indexOf("is not supported, exiting") >= 0)
+        installFailed = true;
 }
 
 String VacuulaInstaller::getLogJson(unsigned long since) {

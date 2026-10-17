@@ -258,6 +258,7 @@ private:
     unsigned long uploadPhaseStartedAt = 0;
     unsigned long uploadLastWriteAt = 0;
     size_t uploadBytesSinceGap = 0;
+    bool uploadNakSeen = false; // NAK byte arrived mid-stream; judged once the blast is complete
     String uploadRxText; // Printable robot output captured during handshake/ack
 
     void startUpload();

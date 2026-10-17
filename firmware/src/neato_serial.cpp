@@ -886,6 +886,7 @@ void NeatoSerial::startUpload() {
     uploadPhaseStartedAt = uploadStartedAt;
     uploadRxText = "";
     uploadBytesSinceGap = 0;
+    uploadNakSeen = false;
     upload.sent = 0;
     upload.phase = UPLOAD_HANDSHAKE;
     state = QUEUE_UPLOAD_WAIT_REQ;
@@ -922,14 +923,14 @@ void NeatoSerial::tickUploadHandshake() {
 }
 
 void NeatoSerial::tickUploadStream() {
-    // Nothing is expected from the robot during a one-shot blast, but a NAK
-    // here means it gave up on us — stop pushing bytes into the void.
+    // Nothing is expected from the robot during a one-shot blast. Neato's own
+    // tool never looks at the port until the whole file and checksum are out,
+    // so do the same: remember a NAK, keep the announced byte count honest,
+    // and let the acknowledgement phase deliver the verdict.
     while (uart.available()) {
         char c = static_cast<char>(uart.read());
-        if (c == UPLOAD_NAK_BYTE) {
-            finishUpload(false, "robot rejected the transfer mid-stream");
-            return;
-        }
+        if (c == UPLOAD_NAK_BYTE)
+            uploadNakSeen = true;
     }
 
     // Short breather after every chunk, mirroring Neato's upload tool.
@@ -974,6 +975,10 @@ void NeatoSerial::tickUploadStream() {
 }
 
 void NeatoSerial::tickUploadAck() {
+    if (uploadNakSeen) {
+        finishUpload(false, "robot rejected the transfer while it was being sent");
+        return;
+    }
     while (uart.available()) {
         char c = static_cast<char>(uart.read());
         if (c == UPLOAD_ACK_BYTE) {

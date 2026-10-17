@@ -62,7 +62,9 @@ AP_WAIT_TIMEOUT_S = 600
 PROVISION_TIMEOUT_S = 300
 CONSOLE_TIMEOUT_S = 150
 ROBOT_APPEAR_TIMEOUT_S = 600
-QUIET_REARM_MS = 900_000  # 15 min: the install runs, the robot reboots, the server link comes up
+# Re-armed right before joining the robot's setup network: must cover waiting for that
+# network, the provisioning, the install script and the robot's reboot (bridge cap: 30 min).
+QUIET_REARM_MS = (AP_WAIT_TIMEOUT_S + PROVISION_TIMEOUT_S + CONSOLE_TIMEOUT_S + 300) * 1000
 
 
 def log(msg: str) -> None:
@@ -325,12 +327,18 @@ def follow_robot_progress(ctx: ssl.SSLContext) -> None:
                 log("Setup network gone; the robot has moved to your WiFi")
                 return
             continue
-        failures = 0
         step = data.get("step") if status == 200 and isinstance(data, dict) else None
-        if isinstance(step, int) and step != last_step:
+        if not isinstance(step, int):
+            failures += 1
+            if failures >= 5:
+                log("Setup network stopped answering; the robot has moved on")
+                return
+            continue
+        failures = 0
+        if step != last_step:
             last_step = step
             log(f"  robot: step {step} ({ROBOT_PROGRESS_STEPS.get(step, '?')})")
-        if isinstance(step, int) and step >= 4:
+        if step >= 4:
             return
     log("No more progress reports from the setup network; moving on")
 
@@ -338,9 +346,10 @@ def follow_robot_progress(ctx: ssl.SSLContext) -> None:
 # -- Step 5: console via the bridge, then the server ------------------------------
 
 
-def tail_console(bridge: str, since: int) -> None:
+def tail_console(bridge: str, since: int, trust_sticky: bool) -> str:
     """Best effort: print what the robot says on its debug UART until the install
-    script reboots it (which also reboots the bridge) or the timeout passes."""
+    script reboots it (which also reboots the bridge) or the timeout passes.
+    Returns "failed", "done" or "unknown"."""
     log("Reconnect this computer to your normal network. Tailing the robot console via the bridge...")
     deadline = time.time() + CONSOLE_TIMEOUT_S
     unreachable = 0
@@ -352,7 +361,7 @@ def tail_console(bridge: str, since: int) -> None:
             unreachable += 1
             if unreachable >= 5:
                 log("Bridge unreachable; the robot (and the bridge with it) is probably rebooting")
-                return
+                return "unknown"
             continue
         unreachable = 0
         if status != 200 or not isinstance(data, dict):
@@ -360,14 +369,30 @@ def tail_console(bridge: str, since: int) -> None:
         for line in data.get("lines", []):
             text = line.get("text", "")
             print(f"  robot> {text}", flush=True)
-            if "vacuula-installer-failed" in text:
+            if any(m in text for m in ("vacuula-installer-failed", "Failed to set", "is not supported, exiting")):
                 log("The robot's install script reported a failure")
-                return
-            if "Rebooting" in text:
+                return "failed"
+            if "Rebooting" in text or "Initialization complete" in text:
                 log("Install script finished on the robot; it is rebooting")
-                return
+                return "done"
         since = data.get("next", since)
+        if not trust_sticky:
+            continue
+        # Sticky verdicts on the bridge survive the console ring rolling over; they are
+        # cleared when the bridge sends a reset, so only trust them on a run that did.
+        try:
+            _, st = http_json(f"{bridge}/api/vacuula/status", timeout=5)
+        except Unreachable:
+            st = None
+        if isinstance(st, dict):
+            if st.get("installFailed"):
+                log("The bridge saw the install script fail")
+                return "failed"
+            if st.get("installDone"):
+                log("The bridge saw the install script finish; the robot is rebooting")
+                return "done"
     log("Console tail timed out (the bridge may have missed the lines); checking the server instead")
+    return "unknown"
 
 
 def wait_for_robot_on_server(base: str, before: dict, mac: str) -> dict | None:
@@ -441,12 +466,20 @@ def main() -> int:
         fail("an SSID is required")
     password = args.password if args.password is not None else getpass.getpass("Home WiFi password: ")
 
+    # Re-arm the bridge's quiet window now, while this computer is still on the home
+    # network: joining the robot's setup network may cut the path to the bridge.
+    reset_this_run = not args.skip_upload
+    rearm_quiet(bridge, QUIET_REARM_MS)
     ctx = robot_ap_context()
     wait_for_robot_ap(ctx)
     provision_robot(ctx, mac, ssid, password)
     follow_robot_progress(ctx)
-    rearm_quiet(bridge, QUIET_REARM_MS)
-    tail_console(bridge, log_since)
+    verdict = tail_console(bridge, log_since, trust_sticky=reset_this_run)
+    if verdict == "failed":
+        resume_bridge(bridge)
+        log("Stopping here. Fix what the robot reported above (its lines are also at "
+            f"{bridge}/api/vacuula/log), then run again.")
+        return 1
     found = wait_for_robot_on_server(server_base, robots_before, mac)
     resume_bridge(bridge)
 

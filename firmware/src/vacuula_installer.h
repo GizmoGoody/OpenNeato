@@ -30,6 +30,8 @@ struct VacuulaStatus : public JsonSerializable {
     bool quiet = false; // Robot polling paused (quiet window after the network reset)
     int quietRemainingMs = 0;
     int logNext = 0; // Sequence number the next captured console line will get
+    bool installDone = false; // Console showed the install script finishing (sticky until the next reset)
+    bool installFailed = false; // Console showed the install script failing (sticky until the next reset)
 
     std::vector<Field> toFields() const override;
 };
@@ -109,6 +111,8 @@ private:
     bool startPending = false; // start() issued GetVersion, archive not yet handed over
     std::vector<LogLine> logLines;
     unsigned long logNext = 0;
+    bool installDone = false;
+    bool installFailed = false;
 
     // Written on the loop task only
     bool resetRequested = false;
