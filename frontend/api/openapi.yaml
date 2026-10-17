@@ -28,6 +28,8 @@ tags:
     description: ESP32 firmware version and OTA update
   - name: History
     description: Cleaning session history and map data
+  - name: Vacuula
+    description: Serial half of a Vacuula hand-over (install archive upload, network reset, quiet window)
 paths:
   /api/version:
     get:
@@ -975,6 +977,121 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /api/vacuula/status:
+    get:
+      tags:
+        - Vacuula
+      summary: Robot identity, firmware gate, upload progress and quiet-window state for the Vacuula hand-over
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VacuulaStatus"
+  /api/vacuula/upload:
+    post:
+      tags:
+        - Vacuula
+      summary: Stream a Vacuula install archive to the robot (Upload Tarball), then optionally reset its WiFi
+      description: Raw tar.gz body with a Content-Length (chunked encoding is not supported), at most 64 KB. Returns 202 once the transfer is queued; follow it through /api/vacuula/status. A refused start discards the received archive.
+      parameters:
+        - name: reset
+          in: query
+          required: false
+          description: 1 (default) sends "SetWifi reset_network" after a successful upload and opens the quiet window; 0 uploads only
+          schema:
+            type: integer
+            enum: [0, 1]
+        - name: force
+          in: query
+          required: false
+          description: 1 bypasses the Botvac D3-D7 model and firmware (4.5.3-189, 4.6.0-72) gate
+          schema:
+            type: integer
+            enum: [0, 1]
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "202":
+          description: transfer queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
+        "400":
+          description: no or incomplete archive, body too large, or body sent without Content-Length
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: refused (upload in progress, quiet window active, manual clean active, unsupported model or firmware, SKey not ready)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/vacuula/reset-network:
+    post:
+      tags:
+        - Vacuula
+      summary: Send the WiFi reset on its own (robot comes up in setup mode) and open the quiet window
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "409":
+          description: quiet window active, manual clean active, SKey not ready, or queue full
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/vacuula/quiet:
+    post:
+      tags:
+        - Vacuula
+      summary: (Re)start the quiet window during which robot polling is paused and console lines are captured
+      parameters:
+        - name: ms
+          in: query
+          required: false
+          description: Window length in milliseconds (default 600000, capped at 1800000)
+          schema:
+            type: integer
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+  /api/vacuula/resume:
+    post:
+      tags:
+        - Vacuula
+      summary: End the quiet window early and resume robot polling
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+  /api/vacuula/log:
+    get:
+      tags:
+        - Vacuula
+      summary: Console lines the robot printed on the debug UART during the quiet window
+      parameters:
+        - name: since
+          in: query
+          required: false
+          description: Only return lines with a sequence number greater than or equal to this
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VacuulaLog"
 components:
   schemas:
     Ok:
@@ -2002,6 +2119,93 @@ components:
             $ref: "#/components/schemas/WiFiNetwork"
       required:
         - networks
+    VacuulaStatus:
+      type: object
+      properties:
+        firmware:
+          type: string
+          description: Robot software version from GetVersion (e.g. "4.5.3.189.0"); empty until identified
+        model:
+          type: string
+        serial:
+          type: string
+          description: Raw "Serial Number" field; the MAC is its second comma-separated part
+        firmwareSupported:
+          type: boolean
+          description: True for the builds Vacuula's Gen3 scripts know (4.5.3-189, 4.6.0-72)
+        skeyReady:
+          type: boolean
+        phase:
+          type: string
+          enum: [idle, pending, handshake, sending, awaiting_ack, done, failed]
+        bytesSent:
+          type: integer
+        bytesTotal:
+          type: integer
+        message:
+          type: string
+          description: Upload outcome text
+        resetRequested:
+          type: boolean
+        resetSent:
+          type: boolean
+        resetError:
+          type: string
+        quiet:
+          type: boolean
+          description: Robot polling paused (quiet window)
+        quietRemainingMs:
+          type: integer
+        logNext:
+          type: integer
+          description: Sequence number the next captured console line will get
+        installDone:
+          type: boolean
+          description: Console showed Vacuula's install script finishing (sticky until the next reset)
+        installFailed:
+          type: boolean
+          description: Console showed Vacuula's install script failing (sticky until the next reset)
+      required:
+        - firmware
+        - model
+        - serial
+        - firmwareSupported
+        - skeyReady
+        - phase
+        - bytesSent
+        - bytesTotal
+        - message
+        - resetRequested
+        - resetSent
+        - resetError
+        - quiet
+        - quietRemainingMs
+        - logNext
+        - installDone
+        - installFailed
+    VacuulaLogLine:
+      type: object
+      properties:
+        seq:
+          type: integer
+        text:
+          type: string
+      required:
+        - seq
+        - text
+    VacuulaLog:
+      type: object
+      properties:
+        next:
+          type: integer
+          description: Sequence number the next line will get; pass it back as `since`
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/VacuulaLogLine"
+      required:
+        - next
+        - lines
   responses:
     Ok:
       description: Success acknowledgement

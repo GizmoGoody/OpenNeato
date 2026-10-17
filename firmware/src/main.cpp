@@ -14,6 +14,7 @@
 #include "manual_clean_manager.h"
 #include "notification_manager.h"
 #include "cleaning_history.h"
+#include "vacuula_installer.h"
 #include "loop_task.h"
 
 // Global objects
@@ -29,8 +30,9 @@ Scheduler scheduler(settingsManager, systemManager, neatoSerial, dataLogger, pre
 ManualCleanManager manualClean(neatoSerial);
 CleaningHistory cleaningHistory(neatoSerial, dataLogger, systemManager);
 NotificationManager notifMgr(neatoSerial, settingsManager, dataLogger, cleaningHistory);
+VacuulaInstaller vacuulaInstaller(neatoSerial, dataLogger);
 WebServer webServer(server, neatoSerial, dataLogger, systemManager, firmwareManager, settingsManager, manualClean,
-                    notifMgr, cleaningHistory, wifiManager, scheduler);
+                    notifMgr, cleaningHistory, wifiManager, scheduler, vacuulaInstaller);
 
 // Tracks whether web server has been started (may be deferred if WiFi was slow at boot)
 bool webServerStarted = false;
@@ -80,6 +82,9 @@ void setup() {
 
     // Wire navigation mode getter so clean() sends SetNavigationMode before house cleans
     neatoSerial.setNavModeGetter([&] { return settingsManager.get().navMode; });
+
+    // Capture robot console lines while the Vacuula hand-over keeps the queue quiet
+    vacuulaInstaller.begin();
 
     // Wire WiFi events to data logger BEFORE WiFi connects so boot events are captured.
     // DataLogger buffers entries in memory - they get flushed once SPIFFS mounts in begin().

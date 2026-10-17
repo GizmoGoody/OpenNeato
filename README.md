@@ -336,6 +336,10 @@ Neato Botvac D3 through D7. D8/D9/D10 are NOT supported (different board, passwo
 
 For detailed instructions and troubleshooting, see the [User Guide](docs/user-guide.md).
 
+Running a [Vacuula](https://github.com/vacuula/vacuula) server as well, for the robot's own maps and no-go
+lines? The bridge can do the serial half of Vacuula's install so the robot never has to be opened again; see
+[docs/vacuula.md](docs/vacuula.md).
+
 > **⚠️ ESP32-C6 / ESP32-H2 owners: one USB flash is required before OTA works.**
 > Fork firmware **v1.11 through v1.13.0** (May–October 2026), and upstream renjfk firmware built after
 > 2026-04-25, reject every over-the-air image on a C6 or H2 with

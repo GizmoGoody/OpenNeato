@@ -98,9 +98,36 @@ void NeatoSerial::tick() {
 
     switch (state) {
         case QUEUE_IDLE:
+            // A pending bulk upload takes the UART as soon as the queue drains.
+            if (upload.phase == UPLOAD_PENDING) {
+                startUpload();
+                break;
+            }
+            // Quiet window: hold the queue, keep listening to the robot.
+            if (queuePauseMs != 0) {
+                if (millis() - queuePausedAt < queuePauseMs) {
+                    readIdleLines();
+                    break;
+                }
+                LOG("NEATO", "Quiet window over, resuming command queue");
+                queuePauseMs = 0;
+                dropQueued("quiet window ended");
+            }
             if (!queue.empty()) {
                 dequeueNext();
             }
+            break;
+
+        case QUEUE_UPLOAD_WAIT_REQ:
+            tickUploadHandshake();
+            break;
+
+        case QUEUE_UPLOAD_STREAM:
+            tickUploadStream();
+            break;
+
+        case QUEUE_UPLOAD_WAIT_ACK:
+            tickUploadAck();
             break;
 
         case QUEUE_SENDING:
@@ -163,6 +190,16 @@ void NeatoSerial::tick() {
 
 bool NeatoSerial::enqueue(const String& command, std::function<void(bool, const String&)> callback,
                           CommandPriority priority, bool waitForResponse) {
+    // Fail fast during the quiet window instead of parking the command (and
+    // its HTTP request) until the window ends.
+    if (queuePauseMs != 0) {
+        LOG("NEATO", "Queue paused, rejecting: %s", command.c_str());
+        if (loggerCallback)
+            loggerCallback(command, CMD_QUEUE_FULL, 0, "", static_cast<int>(queue.size()), 0, 0);
+        if (callback)
+            callback(false, "");
+        return false;
+    }
     if (static_cast<int>(queue.size()) >= NEATO_QUEUE_MAX_SIZE) {
         LOG("NEATO", "Queue full, rejecting: %s", command.c_str());
         if (loggerCallback)
@@ -796,4 +833,250 @@ bool NeatoSerial::sendRaw(const String& cmd, std::function<void(bool, const Stri
     if (cmd.isEmpty())
         return false;
     return enqueue(cmd, callback);
+}
+
+// -- Bulk file upload --------------------------------------------------------
+
+const char *uploadPhaseName(UploadPhase phase) {
+    switch (phase) {
+        case UPLOAD_IDLE:
+            return "idle";
+        case UPLOAD_PENDING:
+            return "pending";
+        case UPLOAD_HANDSHAKE:
+            return "handshake";
+        case UPLOAD_SENDING:
+            return "sending";
+        case UPLOAD_AWAITING_ACK:
+            return "awaiting_ack";
+        case UPLOAD_DONE:
+            return "done";
+        case UPLOAD_FAILED:
+            return "failed";
+    }
+    return "unknown";
+}
+
+bool NeatoSerial::uploadFile(const String& kind, std::vector<uint8_t>&& data,
+                             std::function<void(bool, const String&)> callback) {
+    if (isUploading()) {
+        LOG("NEATO", "Upload rejected: another transfer is in flight (%s)", uploadPhaseName(upload.phase));
+        return false;
+    }
+    if (kind.isEmpty() || data.empty())
+        return false;
+
+    uploadData = std::move(data);
+    // The announced size includes the trailing checksum, as Neato's tool does.
+    uploadCommand =
+            String(CMD_UPLOAD_PREFIX) + kind + CMD_UPLOAD_SIZE + String(uploadData.size() + UPLOAD_CHECKSUM_BYTES);
+    uploadCallback = callback;
+    upload = UploadProgress();
+    upload.phase = UPLOAD_PENDING;
+    upload.total = uploadData.size();
+    LOG("NEATO", "Upload queued: %s (%u bytes)", uploadCommand.c_str(), upload.total);
+    return true;
+}
+
+void NeatoSerial::startUpload() {
+    flushUartRx();
+    LOG("NEATO", "TX: %s", uploadCommand.c_str());
+    uart.print(uploadCommand + "\n");
+    uploadStartedAt = millis();
+    uploadPhaseStartedAt = uploadStartedAt;
+    uploadRxText = "";
+    uploadBytesSinceGap = 0;
+    uploadNakSeen = false;
+    upload.sent = 0;
+    upload.phase = UPLOAD_HANDSHAKE;
+    state = QUEUE_UPLOAD_WAIT_REQ;
+}
+
+void NeatoSerial::collectUploadByte(char c) {
+    if (c < 0x20 || c > 0x7E)
+        return;
+    if (uploadRxText.length() < UPLOAD_RX_TEXT_MAX)
+        uploadRxText += c;
+}
+
+void NeatoSerial::tickUploadHandshake() {
+    while (uart.available()) {
+        char c = static_cast<char>(uart.read());
+        if (c == UPLOAD_REQ_BYTE) {
+            LOG("NEATO", "Upload: robot ready (REQ after %lu ms), streaming %u bytes", millis() - uploadPhaseStartedAt,
+                upload.total);
+            upload.phase = UPLOAD_SENDING;
+            uploadLastWriteAt = millis();
+            state = QUEUE_UPLOAD_STREAM;
+            return;
+        }
+        collectUploadByte(c);
+        // The robot echoes the command and reports an unknown/invalid one as text.
+        if (uploadRxText.indexOf("Unknown Cmd") >= 0) {
+            finishUpload(false, "robot does not support the Upload command");
+            return;
+        }
+    }
+    if (millis() - uploadPhaseStartedAt >= UPLOAD_REQ_TIMEOUT_MS) {
+        finishUpload(false, "robot did not request the upload (got: " + uploadRxText + ")");
+    }
+}
+
+void NeatoSerial::tickUploadStream() {
+    // Nothing is expected from the robot during a one-shot blast. Neato's own
+    // tool never looks at the port until the whole file and checksum are out,
+    // so do the same: remember a NAK, keep the announced byte count honest,
+    // and let the acknowledgement phase deliver the verdict.
+    while (uart.available()) {
+        char c = static_cast<char>(uart.read());
+        if (c == UPLOAD_NAK_BYTE)
+            uploadNakSeen = true;
+    }
+
+    // Short breather after every chunk, mirroring Neato's upload tool.
+    if (uploadBytesSinceGap >= UPLOAD_CHUNK_BYTES) {
+        if (millis() - uploadLastWriteAt < UPLOAD_CHUNK_GAP_MS)
+            return;
+        uploadBytesSinceGap = 0;
+    }
+
+    size_t remaining = uploadData.size() - upload.sent;
+    if (remaining > 0) {
+        int space = uart.availableForWrite();
+        if (space <= 0)
+            return;
+        size_t n = remaining;
+        if (n > static_cast<size_t>(space))
+            n = static_cast<size_t>(space);
+        if (n > UPLOAD_CHUNK_BYTES - uploadBytesSinceGap)
+            n = UPLOAD_CHUNK_BYTES - uploadBytesSinceGap;
+        size_t written = uart.write(uploadData.data() + upload.sent, n);
+        upload.sent += written;
+        uploadBytesSinceGap += written;
+        uploadLastWriteAt = millis();
+        return;
+    }
+
+    // Payload done: trailing little-endian 32-bit sum of every payload byte.
+    uint32_t sum = 0;
+    for (uint8_t b: uploadData)
+        sum += b;
+    uint8_t checksum[UPLOAD_CHECKSUM_BYTES] = {
+            static_cast<uint8_t>(sum & 0xFF), static_cast<uint8_t>((sum >> 8) & 0xFF),
+            static_cast<uint8_t>((sum >> 16) & 0xFF), static_cast<uint8_t>((sum >> 24) & 0xFF)};
+    uart.write(checksum, UPLOAD_CHECKSUM_BYTES);
+    uart.flush();
+    LOG("NEATO", "Upload: %u bytes sent in %lu ms, checksum 0x%08lX, waiting for ACK", upload.sent,
+        millis() - uploadStartedAt, static_cast<unsigned long>(sum));
+    uploadRxText = "";
+    uploadPhaseStartedAt = millis();
+    upload.phase = UPLOAD_AWAITING_ACK;
+    state = QUEUE_UPLOAD_WAIT_ACK;
+}
+
+void NeatoSerial::tickUploadAck() {
+    if (uploadNakSeen) {
+        finishUpload(false, "robot rejected the transfer while it was being sent");
+        return;
+    }
+    while (uart.available()) {
+        char c = static_cast<char>(uart.read());
+        if (c == UPLOAD_ACK_BYTE) {
+            finishUpload(true, "accepted");
+            return;
+        }
+        if (c == UPLOAD_NAK_BYTE) {
+            finishUpload(false, "robot rejected the upload (checksum or size mismatch)");
+            return;
+        }
+        collectUploadByte(c);
+    }
+    if (millis() - uploadPhaseStartedAt >= UPLOAD_ACK_TIMEOUT_MS) {
+        finishUpload(false, "no acknowledgement from robot (got: " + uploadRxText + ")");
+    }
+}
+
+void NeatoSerial::finishUpload(bool ok, const String& message) {
+    unsigned long elapsed = millis() - uploadStartedAt;
+    LOG("NEATO", "Upload %s after %lu ms: %s", ok ? "OK" : "FAILED", elapsed, message.c_str());
+
+    std::vector<uint8_t>().swap(uploadData); // Release the buffer, not just clear it
+    upload.phase = ok ? UPLOAD_DONE : UPLOAD_FAILED;
+    upload.message = message;
+    String cmd = uploadCommand;
+    auto cb = uploadCallback;
+    uploadCallback = nullptr;
+
+    // Same post-command spacing as a regular command before the queue resumes.
+    delayStartedAt = millis();
+    state = QUEUE_INTER_DELAY;
+
+    if (loggerCallback)
+        loggerCallback(cmd, ok ? CMD_SUCCESS : CMD_SERIAL_ERROR, elapsed, message, static_cast<int>(queue.size()),
+                       upload.total, 0);
+    if (cb)
+        cb(ok, message);
+}
+
+bool NeatoSerial::resetNetwork(std::function<void(bool)> callback) {
+    if (!hasSKey())
+        return false;
+    return enqueue(String(CMD_SET_WIFI_RESET_NETWORK) + sKey, wrapAction(callback), PRIORITY_CRITICAL, false);
+}
+
+// -- Quiet window ------------------------------------------------------------
+
+void NeatoSerial::dropQueued(const char *why) {
+    if (queue.empty())
+        return;
+    std::vector<CommandEntry> dropped;
+    dropped.swap(queue);
+    LOG("NEATO", "Dropping %u queued command(s): %s", dropped.size(), why);
+    for (CommandEntry& e: dropped) {
+        if (loggerCallback)
+            loggerCallback(e.command, CMD_QUEUE_FULL, 0, "", 0, 0, 0);
+        if (e.callback)
+            e.callback(false, "");
+    }
+}
+
+void NeatoSerial::pauseQueue(unsigned long ms) {
+    queuePausedAt = millis();
+    queuePauseMs = ms != 0 ? ms : 1; // 0 means "not paused"
+    idleLineBuffer = "";
+    dropQueued("quiet window started");
+    LOG("NEATO", "Command queue paused for %lu ms", ms);
+}
+
+void NeatoSerial::resumeQueue() {
+    if (queuePauseMs == 0)
+        return;
+    queuePauseMs = 0;
+    dropQueued("quiet window ended early");
+    LOG("NEATO", "Command queue resumed");
+}
+
+unsigned long NeatoSerial::queuePausedRemainingMs() const {
+    if (queuePauseMs == 0)
+        return 0;
+    unsigned long elapsed = millis() - queuePausedAt;
+    return elapsed < queuePauseMs ? queuePauseMs - elapsed : 0;
+}
+
+void NeatoSerial::readIdleLines() {
+    while (uart.available()) {
+        char c = static_cast<char>(uart.read());
+        if (c == '\n' || c == '\r' || c == NEATO_RESPONSE_TERMINATOR) {
+            if (idleLineBuffer.length() > 0) {
+                if (idleLineCallback)
+                    idleLineCallback(idleLineBuffer);
+                idleLineBuffer = "";
+            }
+            continue;
+        }
+        if (c < 0x20 || c > 0x7E)
+            continue;
+        if (idleLineBuffer.length() < VACUULA_LOG_LINE_MAX)
+            idleLineBuffer += c;
+    }
 }

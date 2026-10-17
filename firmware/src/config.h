@@ -76,6 +76,30 @@
 #define NEATO_QUEUE_MAX_SIZE 16
 #define NEATO_RESPONSE_TERMINATOR 0x1A // Ctrl-Z
 
+// Bulk file upload ("Upload <kind> size N" + raw byte blast, as Neato's own
+// upload tool does it). The robot answers the command with a single REQ byte,
+// accepts the stream plus a 32-bit byte-sum checksum, then replies ACK or NAK.
+#define UPLOAD_REQ_BYTE 0x05
+#define UPLOAD_ACK_BYTE 0x06
+#define UPLOAD_NAK_BYTE 0x15
+#define UPLOAD_CHECKSUM_BYTES 4
+#define UPLOAD_REQ_TIMEOUT_MS 5000 // Wait for REQ after the Upload command
+#define UPLOAD_ACK_TIMEOUT_MS 10000 // Wait for ACK/NAK after the checksum
+#define UPLOAD_CHUNK_BYTES 1024 // Pause briefly after every chunk of this size
+#define UPLOAD_CHUNK_GAP_MS 3
+#define UPLOAD_RX_TEXT_MAX 240 // Robot text captured around the handshake (for error messages)
+
+// Vacuula hand-over (see docs/vacuula.md): archive size cap for POST /api/vacuula/upload,
+// how long robot polling stays paused after the network reset so the robot can provision
+// itself undisturbed (the PC script re-arms it with POST /api/vacuula/quiet before the
+// provisioning call, since joining the robot's setup network can take a while), and how
+// many unsolicited console lines are kept meanwhile.
+#define VACUULA_UPLOAD_MAX_BYTES 65536
+#define VACUULA_QUIET_MS 600000
+#define VACUULA_QUIET_MAX_MS 1800000
+#define VACUULA_LOG_MAX_LINES 80
+#define VACUULA_LOG_LINE_MAX 200
+
 // initSKey retry — GetVersion can fail at boot if the robot is still powering up.
 // Retry with exponential backoff until the robot responds.
 #define SKEY_RETRY_INITIAL_MS 2000 // First retry after 2s
