@@ -1,7 +1,7 @@
 """The firmware update entity finds, verifies and installs the bridge firmware.
 
 Releases are read from the fork's GitHub releases; the board's file is picked
-by the releaseId the bridge reports, checked against checksums.txt, and sent
+by the board ID the bridge reports, checked against checksums.txt, and sent
 to the bridge's upload endpoint. Skipped on a branch without the update
 platform.
 """
@@ -25,6 +25,7 @@ except ModuleNotFoundError:
 from homeassistant.components.update import UpdateEntityFeature
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -79,7 +80,7 @@ def test_the_newest_published_release_with_firmware_is_picked() -> None:
     assert release.notes == "Notes for v1.16.0"
 
 
-def test_a_bridge_without_release_id_is_told_but_cannot_install() -> None:
+def test_a_bridge_without_board_is_told_but_cannot_install() -> None:
     release = firmware_release.pick_release(RELEASES, None)
     assert release.version == "1.16.0"
     assert release.firmware_url is None
@@ -129,16 +130,17 @@ def no_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(update, "FIRMWARE_REBOOT_TIMEOUT", 0.2)
 
 
-def _entity(hass: HomeAssistant, bridge: FakeBridge, release_id: str | None = "seeed-xiao-esp32c3"):
+def _entity(hass: HomeAssistant, bridge: FakeBridge, board: str | None = "seeed-xiao-esp32c3"):
     entry = MockConfigEntry(domain=const.DOMAIN, data={"host": "bridge"})
     entry.add_to_hass(hass)
     coordinator = DataUpdateCoordinator(
         hass, logging.getLogger(__name__), config_entry=entry, name="test"
     )
     info = {"version": "1.15.0", "chip": "ESP32-C3"}
-    if release_id:
-        info["releaseId"] = release_id
-    entity = update.OpenNeatoFirmwareUpdate(coordinator, entry, bridge, "SERIAL", info)
+    if board:
+        info["board"] = board
+    device = DeviceInfo(identifiers={(const.DOMAIN, "SERIAL_bridge")})
+    entity = update.OpenNeatoFirmwareUpdate(coordinator, entry, bridge, "SERIAL", info, device)
     entity.hass = hass
     entity.async_write_ha_state = Mock()
     hass.config_entries.async_schedule_reload = Mock()
@@ -156,9 +158,9 @@ async def test_releases_are_read_from_github(hass: HomeAssistant, aioclient_mock
     assert await entity.async_release_notes() == "Notes for v1.16.0"
 
 
-async def test_without_release_id_install_is_not_offered(hass: HomeAssistant, aioclient_mock) -> None:
+async def test_without_board_install_is_not_offered(hass: HomeAssistant, aioclient_mock) -> None:
     aioclient_mock.get(const.FIRMWARE_RELEASES_API, json=RELEASES)
-    entity, _ = _entity(hass, FakeBridge(), release_id=None)
+    entity, _ = _entity(hass, FakeBridge(), board=None)
     await entity._async_check_releases()
     assert entity.latest_version == "1.16.0"
     assert not entity.supported_features & UpdateEntityFeature.INSTALL
