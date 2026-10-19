@@ -54,6 +54,7 @@ PLATFORMS: list[Platform] = [
     Platform.SELECT,
     Platform.TEXT,
     Platform.TIME,
+    Platform.UPDATE,
 ]
 
 
@@ -155,6 +156,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "mapper": mapper,
         "serial": serial,
         "devices": devices,
+        "firmware_info": firmware_info,
         "host": host,
     }
 
