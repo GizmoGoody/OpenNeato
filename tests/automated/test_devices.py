@@ -110,7 +110,7 @@ async def test_the_robot_is_connected_via_the_bridge(hass: HomeAssistant) -> Non
     # Setup registers the bridge's device; the entities create the robot's,
     # and Home Assistant resolves its via_device to the bridge's device.
     bridge = registry.async_get_or_create(config_entry_id=entry.entry_id, **devices.bridge)
-    assert registry.async_get_device(identifiers={devices.robot["via_device"]}) == bridge
+    assert devices.robot["via_device"] in bridge.identifiers
     assert bridge.via_device_id is None
 
 
