@@ -132,7 +132,9 @@ def no_wait(monkeypatch: pytest.MonkeyPatch) -> None:
 def _entity(hass: HomeAssistant, bridge: FakeBridge, release_id: str | None = "seeed-xiao-esp32c3"):
     entry = MockConfigEntry(domain=const.DOMAIN, data={"host": "bridge"})
     entry.add_to_hass(hass)
-    coordinator = DataUpdateCoordinator(hass, logging.getLogger(__name__), name="test")
+    coordinator = DataUpdateCoordinator(
+        hass, logging.getLogger(__name__), config_entry=entry, name="test"
+    )
     info = {"version": "1.15.0", "chip": "ESP32-C3"}
     if release_id:
         info["releaseId"] = release_id
