@@ -65,11 +65,17 @@ def test_readable_model(raw: str | None, readable: str | None) -> None:
     assert entity.readable_model(raw) == readable
 
 
-async def test_the_robot_is_connected_via_the_bridge(hass: HomeAssistant, aioclient_mock) -> None:
+async def test_the_robot_is_connected_via_the_bridge(
+    hass: HomeAssistant, aioclient_mock, caplog: pytest.LogCaptureFixture
+) -> None:
     mock_bridge(aioclient_mock)
     with without_frontend(hass):
         entry = await setup_integration(hass)
     robot, bridge = _devices(hass, entry)
+
+    # Home Assistant only logs deprecated calls from custom integrations, so
+    # the log is where a deprecated via_device shows.
+    assert "deprecated `via_device`" not in caplog.text
 
     assert robot.via_device_id == bridge.id
     assert robot.name == "Alfred"
