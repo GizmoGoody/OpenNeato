@@ -32,6 +32,7 @@ class OpenNeatoNumberEntityDescription(NumberEntityDescription):
 NUMBER_DESCRIPTIONS: tuple[OpenNeatoNumberEntityDescription, ...] = (
     OpenNeatoNumberEntityDescription(
         key="brush_rpm_setting",
+        entity_registry_enabled_default=False,
         translation_key="brush_rpm_setting",
         name="Brush RPM",
         section="settings",
@@ -46,6 +47,7 @@ NUMBER_DESCRIPTIONS: tuple[OpenNeatoNumberEntityDescription, ...] = (
     ),
     OpenNeatoNumberEntityDescription(
         key="vacuum_speed_setting",
+        entity_registry_enabled_default=False,
         translation_key="vacuum_speed_setting",
         name="Vacuum speed",
         section="settings",
@@ -60,6 +62,7 @@ NUMBER_DESCRIPTIONS: tuple[OpenNeatoNumberEntityDescription, ...] = (
     ),
     OpenNeatoNumberEntityDescription(
         key="side_brush_power_setting",
+        entity_registry_enabled_default=False,
         translation_key="side_brush_power_setting",
         name="Side brush power",
         section="settings",
@@ -74,6 +77,7 @@ NUMBER_DESCRIPTIONS: tuple[OpenNeatoNumberEntityDescription, ...] = (
     ),
     OpenNeatoNumberEntityDescription(
         key="stall_threshold_setting",
+        entity_registry_enabled_default=False,
         translation_key="stall_threshold_setting",
         name="Stall threshold",
         section="settings",

@@ -80,6 +80,7 @@ SENSOR_DESCRIPTIONS: tuple[OpenNeatoSensorEntityDescription, ...] = (
     ),
     OpenNeatoSensorEntityDescription(
         key="charger_vbattv",
+        entity_registry_enabled_default=False,
         translation_key="battery_voltage",
         name="Battery voltage",
         section="charger",
@@ -90,6 +91,7 @@ SENSOR_DESCRIPTIONS: tuple[OpenNeatoSensorEntityDescription, ...] = (
     ),
     OpenNeatoSensorEntityDescription(
         key="charger_vextv",
+        entity_registry_enabled_default=False,
         translation_key="external_voltage",
         name="External voltage",
         section="charger",
@@ -113,6 +115,7 @@ SENSOR_DESCRIPTIONS: tuple[OpenNeatoSensorEntityDescription, ...] = (
     ),
     OpenNeatoSensorEntityDescription(
         key="charger_discharge_mah",
+        entity_registry_enabled_default=False,
         translation_key="discharge_mah",
         name="Battery discharge",
         section="charger",
@@ -129,6 +132,7 @@ SENSOR_DESCRIPTIONS: tuple[OpenNeatoSensorEntityDescription, ...] = (
     ),
     OpenNeatoSensorEntityDescription(
         key="charger_charge_mah",
+        entity_registry_enabled_default=False,
         translation_key="charge_mah",
         name="Battery charge",
         section="charger",
@@ -155,6 +159,7 @@ SENSOR_DESCRIPTIONS: tuple[OpenNeatoSensorEntityDescription, ...] = (
     ),
     OpenNeatoSensorEntityDescription(
         key="analog_battery_current",
+        entity_registry_enabled_default=False,
         translation_key="analog_battery_current",
         name="Battery current",
         section="analog",
@@ -202,6 +207,7 @@ SENSOR_DESCRIPTIONS: tuple[OpenNeatoSensorEntityDescription, ...] = (
     # ── Error ───────────────────────────────────────────────────────────
     OpenNeatoSensorEntityDescription(
         key="error_code",
+        entity_registry_enabled_default=False,
         translation_key="error_code",
         name="Error code",
         section="error",
@@ -237,6 +243,7 @@ SENSOR_DESCRIPTIONS: tuple[OpenNeatoSensorEntityDescription, ...] = (
     OpenNeatoSensorEntityDescription(
         key="system_uptime",
         bridge=True,
+        entity_registry_enabled_default=False,
         translation_key="uptime",
         name="Uptime",
         section="system",
@@ -249,6 +256,7 @@ SENSOR_DESCRIPTIONS: tuple[OpenNeatoSensorEntityDescription, ...] = (
     OpenNeatoSensorEntityDescription(
         key="system_heap",
         bridge=True,
+        entity_registry_enabled_default=False,
         translation_key="free_heap",
         name="Free heap",
         section="system",
@@ -261,6 +269,7 @@ SENSOR_DESCRIPTIONS: tuple[OpenNeatoSensorEntityDescription, ...] = (
     OpenNeatoSensorEntityDescription(
         key="system_fs_used",
         bridge=True,
+        entity_registry_enabled_default=False,
         translation_key="storage_used",
         name="Storage used",
         section="system",
@@ -273,6 +282,7 @@ SENSOR_DESCRIPTIONS: tuple[OpenNeatoSensorEntityDescription, ...] = (
     # ── Motors ──────────────────────────────────────────────────────────
     OpenNeatoSensorEntityDescription(
         key="motors_brush_rpm",
+        entity_registry_enabled_default=False,
         translation_key="brush_rpm",
         name="Brush RPM",
         section="motors",
@@ -283,6 +293,7 @@ SENSOR_DESCRIPTIONS: tuple[OpenNeatoSensorEntityDescription, ...] = (
     ),
     OpenNeatoSensorEntityDescription(
         key="motors_vacuum_rpm",
+        entity_registry_enabled_default=False,
         translation_key="vacuum_rpm",
         name="Vacuum RPM",
         section="motors",
@@ -293,6 +304,7 @@ SENSOR_DESCRIPTIONS: tuple[OpenNeatoSensorEntityDescription, ...] = (
     ),
     OpenNeatoSensorEntityDescription(
         key="motors_side_brush_ma",
+        entity_registry_enabled_default=False,
         translation_key="side_brush_current",
         name="Side brush current",
         section="motors",
@@ -303,6 +315,7 @@ SENSOR_DESCRIPTIONS: tuple[OpenNeatoSensorEntityDescription, ...] = (
     ),
     OpenNeatoSensorEntityDescription(
         key="motors_laser_rpm",
+        entity_registry_enabled_default=False,
         translation_key="lidar_rpm",
         name="LIDAR RPM",
         section="motors",
