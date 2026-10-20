@@ -12,6 +12,9 @@ from dataclasses import dataclass
 import re
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC, DeviceInfo, format_mac
 from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
 
@@ -48,16 +51,17 @@ def build_devices(
 
     The bridge's hostname is the name the user gave the robot in the bridge's
     web UI, so it names both devices. Firmware older than the board fields
-    leaves the bridge's maker, model and MAC empty.
+    leaves the bridge's maker, model and MAC empty. The robot's link to the
+    bridge is set by async_register_devices, not here: Home Assistant has
+    deprecated via_device in device info.
     """
     hostname = str(firmware_info.get("hostname") or "").strip()
     raw_model = robot_info.get("modelName") or None
     url = f"http://{host}"
-    bridge_id = (DOMAIN, f"{serial}_bridge")
     mac = firmware_info.get("mac")
 
     bridge = DeviceInfo(
-        identifiers={bridge_id},
+        identifiers={(DOMAIN, f"{serial}_bridge")},
         name=f"{hostname} bridge" if hostname else "OpenNeato bridge",
         manufacturer=firmware_info.get("boardMaker") or None,
         model=firmware_info.get("boardName") or None,
@@ -78,9 +82,15 @@ def build_devices(
         sw_version=robot_info.get("softwareVersion") or None,
         serial_number=serial,
         configuration_url=url,
-        via_device=bridge_id,
     )
     return OpenNeatoDevices(robot=robot, bridge=bridge)
+
+
+def async_register_devices(hass: HomeAssistant, entry: ConfigEntry, devices: OpenNeatoDevices) -> None:
+    """Register the bridge's device, then the robot's, connected via the bridge's."""
+    registry = dr.async_get(hass)
+    bridge = registry.async_get_or_create(config_entry_id=entry.entry_id, **devices.bridge)
+    registry.async_get_or_create(config_entry_id=entry.entry_id, via_device_id=bridge.id, **devices.robot)
 
 
 def device_for(devices: OpenNeatoDevices, description: Any) -> DeviceInfo:
