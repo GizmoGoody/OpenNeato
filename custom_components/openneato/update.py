@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from asyncio import timeout
-from datetime import datetime, timedelta
+from datetime import timedelta
 import hashlib
 import logging
 import time
@@ -35,7 +35,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import OpenNeatoApiClient, OpenNeatoApiError, OpenNeatoConnectionError
 from .const import (
@@ -55,13 +55,46 @@ _LOGGER = logging.getLogger(__name__)
 DOWNLOAD_TIMEOUT = 60  # seconds
 
 
+class FirmwareReleaseCoordinator(DataUpdateCoordinator[FirmwareRelease | None]):
+    """Reads the fork's GitHub releases every few hours.
+
+    When GitHub cannot be reached the refresh fails and the last answer is
+    kept, so the update entity does not flip to "unknown"; GitHub being
+    unreachable is not a fault of the bridge.
+    """
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, board: str | None) -> None:
+        """Initialize the release check for one bridge's board."""
+        super().__init__(
+            hass,
+            _LOGGER,
+            config_entry=entry,
+            name=f"{DOMAIN} firmware releases",
+            update_interval=timedelta(seconds=FIRMWARE_CHECK_INTERVAL),
+        )
+        self._board = board
+
+    async def _async_update_data(self) -> FirmwareRelease | None:
+        """Return the newest release that carries firmware."""
+        session = async_get_clientsession(self.hass)
+        try:
+            async with timeout(DOWNLOAD_TIMEOUT):
+                async with session.get(
+                    FIRMWARE_RELEASES_API, headers={"Accept": "application/vnd.github+json"}
+                ) as response:
+                    response.raise_for_status()
+                    releases = await response.json()
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise UpdateFailed(f"Could not read the firmware releases: {err}") from err
+        return pick_release(releases if isinstance(releases, list) else [], self._board)
+
+
 class OpenNeatoFirmwareUpdate(OpenNeatoEntity, UpdateEntity):
     """The bridge firmware, compared with the newest fork release."""
 
     _attr_device_class = UpdateDeviceClass.FIRMWARE
     _attr_entity_category = EntityCategory.CONFIG
     _attr_translation_key = "firmware"
-    _attr_name = "Firmware"
 
     def __init__(
         self,
@@ -71,15 +104,20 @@ class OpenNeatoFirmwareUpdate(OpenNeatoEntity, UpdateEntity):
         serial: str,
         firmware_info: dict[str, Any],
         device_info: DeviceInfo,
+        releases: FirmwareReleaseCoordinator,
     ) -> None:
         """Initialize the update entity."""
         super().__init__(coordinator, serial, device_info)
         self._attr_unique_id = f"{serial}_firmware"
         self._entry = entry
         self._api = api
-        self._board: str | None = firmware_info.get("board") or None
+        self._releases = releases
         self._attr_installed_version = str(firmware_info.get("version") or "") or None
-        self._release: FirmwareRelease | None = None
+
+    @property
+    def _release(self) -> FirmwareRelease | None:
+        """The newest release that carries firmware, once known."""
+        return self._releases.data
 
     @property
     def supported_features(self) -> UpdateEntityFeature:
@@ -100,34 +138,9 @@ class OpenNeatoFirmwareUpdate(OpenNeatoEntity, UpdateEntity):
         return self._release.release_url if self._release else None
 
     async def async_added_to_hass(self) -> None:
-        """Check the releases now and every few hours."""
+        """Follow the release check as well as the bridge."""
         await super().async_added_to_hass()
-        self.async_on_remove(
-            async_track_time_interval(
-                self.hass, self._async_check_releases, timedelta(seconds=FIRMWARE_CHECK_INTERVAL)
-            )
-        )
-        self._entry.async_create_background_task(
-            self.hass, self._async_check_releases(), f"{DOMAIN} firmware release check"
-        )
-
-    async def _async_check_releases(self, _now: datetime | None = None) -> None:
-        """Read the fork's releases and keep the newest one with firmware."""
-        session = async_get_clientsession(self.hass)
-        try:
-            async with timeout(DOWNLOAD_TIMEOUT):
-                async with session.get(
-                    FIRMWARE_RELEASES_API, headers={"Accept": "application/vnd.github+json"}
-                ) as response:
-                    response.raise_for_status()
-                    releases = await response.json()
-        except (aiohttp.ClientError, TimeoutError) as err:
-            # Keep the last answer; GitHub being unreachable is not a fault
-            # of the bridge.
-            _LOGGER.debug("Could not read the firmware releases: %s", err)
-            return
-        self._release = pick_release(releases if isinstance(releases, list) else [], self._board)
-        self.async_write_ha_state()
+        self.async_on_remove(self._releases.async_add_listener(self.async_write_ha_state))
 
     async def async_release_notes(self) -> str | None:
         """Return the newest firmware release's notes."""
@@ -200,6 +213,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up the OpenNeato firmware update entity from a config entry."""
     data = hass.data[DOMAIN][entry.entry_id]
+    releases = FirmwareReleaseCoordinator(hass, entry, data["firmware_info"].get("board") or None)
     async_add_entities(
         [
             OpenNeatoFirmwareUpdate(
@@ -209,6 +223,12 @@ async def async_setup_entry(
                 data["serial"],
                 data["firmware_info"],
                 data["devices"].bridge,
+                releases,
             )
         ]
+    )
+    # In the background: setup does not wait for GitHub. Later checks follow
+    # the coordinator's interval once the entity listens.
+    entry.async_create_background_task(
+        hass, releases.async_refresh(), f"{DOMAIN} firmware release check"
     )
