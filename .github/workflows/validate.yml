@@ -9,6 +9,10 @@ name: Validate
 # tests, so any branch can run the whole suite. The firmware, frontend and
 # flash tool jobs mirror the upstream ci.yml, which only runs on pushes to
 # main and on pull requests.
+# The "Firmware file" job also keeps one board's firmware as a download, to
+# flash on a real bridge through its web UI before a pull request:
+#   gh workflow run validate.yml -f branch=dev -f firmware_env=xiao-c3-release
+#   gh run download <RUN_ID>
 
 on:
   workflow_dispatch:
@@ -17,6 +21,10 @@ on:
         description: Branch to test
         required: true
         default: dev
+      firmware_env:
+        description: PlatformIO release environment of the firmware file to keep
+        required: true
+        default: xiao-c3-release
   push:
     branches: [ci]
 
@@ -187,6 +195,58 @@ jobs:
 
       - name: Static analysis (clang-tidy)
         run: pio check -e ${{ matrix.env }} --fail-on-defect=low
+
+  firmware-file:
+    # Built like a release (a *-release environment: no serial logging, the
+    # release file name), but versioned 0.0-<commit> by scripts/env_config.py,
+    # so a bridge running it never looks like it runs a release.
+    name: Firmware file (${{ inputs.firmware_env || 'xiao-c3-release' }})
+    runs-on: ubuntu-latest
+    env:
+      PIO_ENV: ${{ inputs.firmware_env || 'xiao-c3-release' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.branch || github.ref_name }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend (generates web_assets.h)
+        run: npm ci && npm run build
+        working-directory: frontend
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/platformio-requirements.txt
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/platforms
+            ~/.platformio/packages
+            .pio/libdeps
+          key: platformio-${{ env.PIO_ENV }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install -r .github/platformio-requirements.txt
+
+      - name: Build firmware
+        run: pio run -e "$PIO_ENV"
+
+      - name: Keep the firmware file
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ env.PIO_ENV }}
+          path: .pio/build/${{ env.PIO_ENV }}/openneato-*-firmware.bin
+          if-no-files-found: error
 
   frontend:
     name: Frontend
