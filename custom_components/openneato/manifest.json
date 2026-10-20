@@ -15,5 +15,5 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/Leicas/OpenNeato/issues",
   "requirements": [],
-  "version": "1.14.1"
+  "version": "1.15.0"
 }

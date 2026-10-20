@@ -10,15 +10,17 @@
 #include "cleaning_history.h"
 #include "wifi_manager.h"
 #include "scheduler.h"
+#include "vacuula_installer.h"
 #include <SPIFFS.h>
 
 unsigned long WebServer::lastApiActivity = 0;
 
 WebServer::WebServer(AsyncWebServer& server, NeatoSerial& neato, DataLogger& logger, SystemManager& sys,
                      FirmwareManager& fw, SettingsManager& settings, ManualCleanManager& manual,
-                     NotificationManager& notif, CleaningHistory& history, WiFiManager& wifi, Scheduler& scheduler) :
+                     NotificationManager& notif, CleaningHistory& history, WiFiManager& wifi, Scheduler& scheduler,
+                     VacuulaInstaller& vacuula) :
     server(server), neato(neato), logger(logger), sysMgr(sys), fwMgr(fw), settingsMgr(settings), manualMgr(manual),
-    notifMgr(notif), historyMgr(history), wifiMgr(wifi), scheduler(scheduler) {}
+    notifMgr(notif), historyMgr(history), wifiMgr(wifi), scheduler(scheduler), vacuulaMgr(vacuula) {}
 
 void WebServer::loggedRoute(const char *path, WebRequestMethodComposite httpMethod, SyncHandler handler) {
     server.on(path, httpMethod, [this, handler](AsyncWebServerRequest *request) {
@@ -74,6 +76,7 @@ void WebServer::begin() {
     registerFirmwareRoutes();
     registerMapRoutes();
     registerWiFiRoutes();
+    registerVacuulaRoutes();
 
     LOG("WEB", "Frontend and API routes registered");
 }
@@ -573,4 +576,84 @@ void WebServer::registerWiFiRoutes() {
     registerPostRoute("/api/wifi/disconnect", wifiMgr, &WiFiManager::disconnect, {});
 
     LOG("WEB", "WiFi routes registered");
+}
+
+// -- Vacuula hand-over endpoints ---------------------------------------------
+// Serial half of a Vacuula install (see docs/vacuula.md). The PC-side script
+// posts the archive here, follows progress through /status and /log, and does
+// the rest over the robot's setup access point.
+
+void WebServer::registerVacuulaRoutes() {
+    // GET /api/vacuula/status — robot identity, firmware gate, upload progress, quiet window
+    registerGetRoute("/api/vacuula/status", vacuulaMgr, &VacuulaInstaller::getStatus, {});
+
+    // GET /api/vacuula/log[?since=N] — robot console lines captured during the quiet window
+    loggedRoute("/api/vacuula/log", HTTP_GET, [this](AsyncWebServerRequest *request) -> int {
+        unsigned long since = request->hasParam("since") ? request->getParam("since")->value().toInt() : 0;
+        request->send(200, "application/json", vacuulaMgr.getLogJson(since));
+        return 200;
+    });
+
+    // POST /api/vacuula/upload[?reset=1][&force=0] — raw tar.gz body, then upload + network reset
+    server.on(
+            "/api/vacuula/upload", HTTP_POST,
+            [this](AsyncWebServerRequest *request) {
+                lastApiActivity = millis();
+                unsigned long startMs = lastApiActivity;
+                if (!vacuulaMgr.receiveComplete(request)) {
+                    String err = vacuulaMgr.getReceiveError();
+                    logger.logRequest(HTTP_POST, "/api/vacuula/upload", 400, millis() - startMs);
+                    sendError(request, 400, err.isEmpty() ? "no archive received" : err);
+                    return;
+                }
+                bool reset = !request->hasParam("reset") || request->getParam("reset")->value().toInt() != 0;
+                bool force = request->hasParam("force") && request->getParam("force")->value().toInt() != 0;
+
+                auto weak = request->pause();
+                vacuulaMgr.start(reset, force, [this, weak, startMs](bool ok, const String& error) {
+                    auto req = weak.lock();
+                    if (!req)
+                        return;
+                    int status = ok ? 202 : 409;
+                    logger.logRequest(HTTP_POST, "/api/vacuula/upload", status, millis() - startMs);
+                    if (ok)
+                        req->send(202, "application/json", fieldsToJson({{"ok", "true", FIELD_BOOL}}));
+                    else
+                        sendError(req.get(), status, error);
+                });
+            },
+            nullptr,
+            [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+                if (index == 0)
+                    vacuulaMgr.beginReceive(request, total);
+                vacuulaMgr.receiveChunk(request, data, len);
+            });
+
+    // POST /api/vacuula/quiet[?ms=N] — (re)start the quiet window, e.g. right before provisioning
+    loggedRoute("/api/vacuula/quiet", HTTP_POST, [this](AsyncWebServerRequest *request) -> int {
+        unsigned long ms = request->hasParam("ms") ? request->getParam("ms")->value().toInt() : 0;
+        vacuulaMgr.armQuiet(ms);
+        sendOk(request);
+        return 200;
+    });
+
+    // POST /api/vacuula/reset-network — resend the WiFi reset on its own
+    loggedRoute("/api/vacuula/reset-network", HTTP_POST, [this](AsyncWebServerRequest *request) -> int {
+        String error;
+        if (!vacuulaMgr.resetNetwork(error)) {
+            sendError(request, 409, error);
+            return 409;
+        }
+        sendOk(request);
+        return 200;
+    });
+
+    // POST /api/vacuula/resume — end the quiet window early
+    loggedRoute("/api/vacuula/resume", HTTP_POST, [this](AsyncWebServerRequest *request) -> int {
+        vacuulaMgr.endQuiet();
+        sendOk(request);
+        return 200;
+    });
+
+    LOG("WEB", "Vacuula routes registered");
 }

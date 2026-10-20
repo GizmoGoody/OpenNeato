@@ -24,7 +24,35 @@ enum CommandPriority : uint8_t {
     PRIORITY_NORMAL = 4,
 };
 
-enum QueueState { QUEUE_IDLE, QUEUE_SENDING, QUEUE_WAITING_RESPONSE, QUEUE_INTER_DELAY };
+enum QueueState {
+    QUEUE_IDLE,
+    QUEUE_SENDING,
+    QUEUE_WAITING_RESPONSE,
+    QUEUE_INTER_DELAY,
+    QUEUE_UPLOAD_WAIT_REQ, // "Upload ..." sent, waiting for the robot's REQ byte
+    QUEUE_UPLOAD_STREAM, // Blasting the payload
+    QUEUE_UPLOAD_WAIT_ACK // Checksum sent, waiting for ACK/NAK
+};
+
+// Phases of a bulk upload, exposed for status reporting.
+enum UploadPhase : uint8_t {
+    UPLOAD_IDLE, // Nothing uploaded since boot
+    UPLOAD_PENDING, // Queued, waits for the command queue to drain
+    UPLOAD_HANDSHAKE,
+    UPLOAD_SENDING,
+    UPLOAD_AWAITING_ACK,
+    UPLOAD_DONE,
+    UPLOAD_FAILED
+};
+
+struct UploadProgress {
+    UploadPhase phase = UPLOAD_IDLE;
+    size_t sent = 0;
+    size_t total = 0;
+    String message; // Outcome text once DONE/FAILED
+};
+
+const char *uploadPhaseName(UploadPhase phase);
 
 class NeatoSerial : public LoopTask {
 public:
@@ -93,6 +121,38 @@ public:
 
     // -- Raw command (temporary debug endpoint) --------------------------------
     bool sendRaw(const String& cmd, std::function<void(bool, const String&)> callback);
+
+    // -- Bulk file upload ------------------------------------------------------
+    // Hands a file to the robot with "Upload <kind> size N" followed by a raw
+    // byte blast and a 32-bit byte-sum checksum (the robot's own upload
+    // protocol). The transfer takes over the UART once the queue is idle;
+    // queued commands resume afterwards. `data` is moved in and released when
+    // the transfer ends. Returns false if a transfer is already in flight.
+    bool uploadFile(const String& kind, std::vector<uint8_t>&& data,
+                    std::function<void(bool, const String&)> callback = nullptr);
+    bool isUploading() const { return upload.phase >= UPLOAD_PENDING && upload.phase <= UPLOAD_AWAITING_ACK; }
+    const UploadProgress& getUploadProgress() const { return upload; }
+
+    // Ask the robot to forget its WiFi network and bring up its setup access
+    // point ("SetWifi reset_network", needs the SKey). Fire-and-forget: the
+    // robot drops the console reply while it reconfigures the radio.
+    bool resetNetwork(std::function<void(bool)> callback = nullptr);
+
+    // -- Quiet window ----------------------------------------------------------
+    // Hold the command queue for `ms` milliseconds: queued commands are failed
+    // at once (so nothing stale fires when the window ends), new ones are
+    // rejected immediately, and unsolicited UART output (robot console/log
+    // lines) is handed to the idle line callback instead of being flushed.
+    // Used while the robot provisions itself after a network reset so our
+    // polling does not interfere. Calling pauseQueue again restarts the window.
+    void pauseQueue(unsigned long ms);
+    void resumeQueue();
+    bool isQueuePaused() const { return queuePauseMs != 0; }
+    unsigned long queuePausedRemainingMs() const;
+    void setIdleLineCallback(std::function<void(const String&)> cb) { idleLineCallback = cb; }
+
+    // True while ManualCleanManager drives the wheels (see setManualCleanActive).
+    bool isManualCleanActive() const { return manualCleanActive; }
 
     // -- Cache invalidation --------------------------------------------------
     // Call after actions that change robot state (cleaning, test mode, etc.)
@@ -188,6 +248,35 @@ private:
 
     // Drain all pending bytes from the UART receive buffer.
     void flushUartRx();
+
+    // -- Bulk upload state -----------------------------------------------------
+    UploadProgress upload;
+    std::vector<uint8_t> uploadData;
+    String uploadCommand;
+    std::function<void(bool, const String&)> uploadCallback;
+    unsigned long uploadStartedAt = 0;
+    unsigned long uploadPhaseStartedAt = 0;
+    unsigned long uploadLastWriteAt = 0;
+    size_t uploadBytesSinceGap = 0;
+    bool uploadNakSeen = false; // NAK byte arrived mid-stream; judged once the blast is complete
+    String uploadRxText; // Printable robot output captured during handshake/ack
+
+    void startUpload();
+    void tickUploadHandshake();
+    void tickUploadStream();
+    void tickUploadAck();
+    void finishUpload(bool ok, const String& message);
+    void collectUploadByte(char c);
+
+    // -- Quiet window state ----------------------------------------------------
+    unsigned long queuePausedAt = 0; // millis() when the window started
+    unsigned long queuePauseMs = 0; // Window length; 0 = not paused (wrap-safe elapsed check)
+    std::function<void(const String&)> idleLineCallback;
+    String idleLineBuffer;
+    void readIdleLines();
+
+    // Fail every queued command (callback false) and empty the queue.
+    void dropQueued(const char *why);
 
     // -- Async caches (one per sensor type) ----------------------------------
     // Each cache owns a fetch function that enqueues the serial command.

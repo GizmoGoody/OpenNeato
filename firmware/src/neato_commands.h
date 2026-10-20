@@ -29,6 +29,10 @@
 #define CMD_SET_LDS_ROTATION_ON "SetLDSRotation On"
 #define CMD_SET_LDS_ROTATION_OFF "SetLDSRotation Off"
 #define CMD_PLAY_SOUND "PlaySound"
+// -- Bulk upload / WiFi reset (D3-D7) ----------------------------------------
+#define CMD_UPLOAD_PREFIX "Upload "
+#define CMD_UPLOAD_SIZE " size "
+#define CMD_SET_WIFI_RESET_NETWORK "SetWifi reset_network skey "
 // -- SetEvent constants (D3-D7, requires SKey) --------------------------------
 #define CMD_SET_EVENT_PREFIX "SetEvent event "
 #define CMD_SET_EVENT_SKEY " SKey "
