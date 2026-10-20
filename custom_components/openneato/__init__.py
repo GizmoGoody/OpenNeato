@@ -9,7 +9,6 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
@@ -26,7 +25,7 @@ from .const import (
     MAP_DEFAULT_ENABLED,
 )
 from .coordinator import OpenNeatoCoordinator
-from .entity import build_devices
+from .entity import async_register_devices, build_devices
 from .firmware_check import FIRMWARE_UNSUPPORTED, classify_firmware
 from .http import OpenNeatoMapView
 from .lidar_runner import LidarMapRunner
@@ -134,9 +133,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         {"version": entry.data.get("firmware_version"), **firmware_info},
         host,
     )
-    # The robot's device is connected via the bridge's, so the bridge's must
-    # exist before the entities create the robot's.
-    dr.async_get(hass).async_get_or_create(config_entry_id=entry.entry_id, **devices.bridge)
+    async_register_devices(hass, entry, devices)
 
     coordinator = OpenNeatoCoordinator(hass, api)
     await coordinator.async_config_entry_first_refresh()
