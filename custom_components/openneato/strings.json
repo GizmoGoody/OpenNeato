@@ -365,11 +365,6 @@
       "schedule_sunday_2": {
         "name": "Schedule Sunday 2"
       }
-    },
-    "update": {
-      "firmware": {
-        "name": "Firmware"
-      }
     }
   },
   "options": {

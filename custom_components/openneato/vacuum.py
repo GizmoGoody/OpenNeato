@@ -12,7 +12,6 @@ from homeassistant.components.vacuum import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api import OpenNeatoApiClient
@@ -47,7 +46,10 @@ async def async_setup_entry(
                 coordinator=data["coordinator"],
                 api=data["api"],
                 serial=data["serial"],
-                device_info=data["devices"].robot,
+                model=data["model"],
+                sw_version=data["sw_version"],
+                fw_version=data["fw_version"],
+                host=data["host"],
             )
         ]
     )
@@ -65,10 +67,16 @@ class OpenNeatoVacuum(OpenNeatoEntity, StateVacuumEntity):
         coordinator,
         api: OpenNeatoApiClient,
         serial: str,
-        device_info: DeviceInfo,
+        model: str | None = None,
+        sw_version: str | None = None,
+        fw_version: str | None = None,
+        host: str | None = None,
     ) -> None:
         """Initialize the vacuum entity."""
-        super().__init__(coordinator, serial, device_info)
+        super().__init__(
+            coordinator, serial,
+            model=model, sw_version=sw_version, fw_version=fw_version, host=host,
+        )
         self._api = api
         self._attr_unique_id = f"{serial}_vacuum"
 

@@ -15,12 +15,11 @@ from homeassistant.components.button import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api import OpenNeatoApiClient
 from .const import DOMAIN
-from .entity import OpenNeatoEntity, device_for
+from .entity import OpenNeatoEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,14 +29,11 @@ class OpenNeatoButtonEntityDescription(ButtonEntityDescription):
     """Describe an OpenNeato button."""
 
     press_fn: Callable[[OpenNeatoApiClient], Coroutine[Any, Any, Any]]
-    # The bridge's own setting or reading: shown on the bridge's device.
-    bridge: bool = False
 
 
 BUTTON_DESCRIPTIONS: tuple[OpenNeatoButtonEntityDescription, ...] = (
     OpenNeatoButtonEntityDescription(
         key="restart",
-        bridge=True,
         translation_key="restart",
         name="Restart device",
         device_class=ButtonDeviceClass.RESTART,
@@ -46,7 +42,6 @@ BUTTON_DESCRIPTIONS: tuple[OpenNeatoButtonEntityDescription, ...] = (
     ),
     OpenNeatoButtonEntityDescription(
         key="format_fs",
-        bridge=True,
         translation_key="format_fs",
         name="Format filesystem",
         icon="mdi:harddisk-remove",
@@ -111,12 +106,15 @@ class OpenNeatoButton(OpenNeatoEntity, ButtonEntity):
         serial: str,
         description: OpenNeatoButtonEntityDescription,
         api: OpenNeatoApiClient,
-        device_info: DeviceInfo,
+        model: str | None = None,
+        sw_version: str | None = None,
+        fw_version: str | None = None,
+        host: str | None = None,
     ) -> None:
         """Initialize the button."""
         super().__init__(
             coordinator, serial,
-            device_info,
+            model=model, sw_version=sw_version, fw_version=fw_version, host=host,
         )
         self.entity_description = description
         self._attr_unique_id = f"{serial}_{description.key}"
@@ -135,7 +133,10 @@ async def async_setup_entry(
     """Set up OpenNeato buttons from a config entry."""
     data = hass.data[DOMAIN][entry.entry_id]
     serial = data["serial"]
-    devices = data["devices"]
+    model = data["model"]
+    sw_version = data["sw_version"]
+    fw_version = data["fw_version"]
+    host = data["host"]
     api = data["api"]
     coordinator = data["coordinator"]
 
@@ -143,7 +144,7 @@ async def async_setup_entry(
         [
             OpenNeatoButton(
                 coordinator, serial, description, api,
-                device_for(devices, description),
+                model=model, sw_version=sw_version, fw_version=fw_version, host=host,
             )
             for description in BUTTON_DESCRIPTIONS
         ]

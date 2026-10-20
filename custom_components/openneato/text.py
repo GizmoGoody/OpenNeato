@@ -9,13 +9,12 @@ from homeassistant.components.text import TextEntity, TextEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .api import OpenNeatoApiClient
 from .const import DOMAIN
-from .entity import OpenNeatoEntity, device_for
+from .entity import OpenNeatoEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,14 +25,11 @@ class OpenNeatoTextEntityDescription(TextEntityDescription):
 
     section: str = "settings"
     settings_field: str = ""
-    # The bridge's own setting or reading: shown on the bridge's device.
-    bridge: bool = False
 
 
 TEXT_DESCRIPTIONS: tuple[OpenNeatoTextEntityDescription, ...] = (
     OpenNeatoTextEntityDescription(
         key="syslog_ip",
-        bridge=True,
         translation_key="syslog_ip",
         name="Syslog server IP",
         section="settings",
@@ -46,7 +42,6 @@ TEXT_DESCRIPTIONS: tuple[OpenNeatoTextEntityDescription, ...] = (
     ),
     OpenNeatoTextEntityDescription(
         key="ntfy_topic",
-        bridge=True,
         translation_key="ntfy_topic",
         name="Notification topic",
         section="settings",
@@ -56,7 +51,6 @@ TEXT_DESCRIPTIONS: tuple[OpenNeatoTextEntityDescription, ...] = (
     ),
     OpenNeatoTextEntityDescription(
         key="ntfy_server",
-        bridge=True,
         translation_key="ntfy_server",
         name="Notification server",
         section="settings",
@@ -66,7 +60,6 @@ TEXT_DESCRIPTIONS: tuple[OpenNeatoTextEntityDescription, ...] = (
     ),
     OpenNeatoTextEntityDescription(
         key="ntfy_token",
-        bridge=True,
         translation_key="ntfy_token",
         name="Notification token",
         section="settings",
@@ -88,13 +81,19 @@ class OpenNeatoText(OpenNeatoEntity, TextEntity):
         serial: str,
         description: OpenNeatoTextEntityDescription,
         api: OpenNeatoApiClient,
-        device_info: DeviceInfo,
+        model: str | None = None,
+        sw_version: str | None = None,
+        fw_version: str | None = None,
+        host: str | None = None,
     ) -> None:
         """Initialize the text entity."""
         super().__init__(
             coordinator,
             serial,
-            device_info,
+            model=model,
+            sw_version=sw_version,
+            fw_version=fw_version,
+            host=host,
         )
         self.entity_description = description
         self._attr_unique_id = f"{serial}_{description.key}"
@@ -128,7 +127,10 @@ async def async_setup_entry(
     """Set up OpenNeato text entities from a config entry."""
     data = hass.data[DOMAIN][entry.entry_id]
     serial = data["serial"]
-    devices = data["devices"]
+    model = data["model"]
+    sw_version = data["sw_version"]
+    fw_version = data["fw_version"]
+    host = data["host"]
     api = data["api"]
     coordinator = data["coordinator"]
 
@@ -140,7 +142,10 @@ async def async_setup_entry(
                 serial,
                 description,
                 api,
-                device_for(devices, description),
+                model=model,
+                sw_version=sw_version,
+                fw_version=fw_version,
+                host=host,
             )
         )
 

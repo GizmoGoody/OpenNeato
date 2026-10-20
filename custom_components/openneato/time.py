@@ -27,7 +27,6 @@ from homeassistant.components.time import TimeEntity, TimeEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
@@ -81,13 +80,19 @@ class OpenNeatoScheduleTime(OpenNeatoEntity, TimeEntity):
         serial: str,
         description: OpenNeatoTimeEntityDescription,
         api: OpenNeatoApiClient,
-        device_info: DeviceInfo,
+        model: str | None = None,
+        sw_version: str | None = None,
+        fw_version: str | None = None,
+        host: str | None = None,
     ) -> None:
         """Initialize the time entity."""
         super().__init__(
             coordinator,
             serial,
-            device_info,
+            model=model,
+            sw_version=sw_version,
+            fw_version=fw_version,
+            host=host,
         )
         self.entity_description = description
         self._attr_unique_id = f"{serial}_{description.key}"
@@ -135,7 +140,10 @@ async def async_setup_entry(
             data["serial"],
             description,
             data["api"],
-            data["devices"].robot,
+            model=data["model"],
+            sw_version=data["sw_version"],
+            fw_version=data["fw_version"],
+            host=data["host"],
         )
         for description in TIME_DESCRIPTIONS
     )
