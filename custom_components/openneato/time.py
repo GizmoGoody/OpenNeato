@@ -61,6 +61,7 @@ def _descriptions() -> tuple[OpenNeatoTimeEntityDescription, ...]:
                     hour_field=fields["hour"],
                     minute_field=fields["minute"],
                     icon="mdi:clock-outline",
+                    entity_registry_enabled_default=False,
                     entity_category=EntityCategory.CONFIG,
                 )
             )

@@ -88,6 +88,7 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[OpenNeatoBinarySensorEntityDescription, ...] =
     OpenNeatoBinarySensorEntityDescription(
         key="system_ntp_synced",
         bridge=True,
+        entity_registry_enabled_default=False,
         translation_key="ntp_synced",
         name="NTP synced",
         section="system",
@@ -107,6 +108,7 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[OpenNeatoBinarySensorEntityDescription, ...] =
     ),
     OpenNeatoBinarySensorEntityDescription(
         key="sensors_left_wheel_extended",
+        entity_registry_enabled_default=False,
         translation_key="left_wheel_lifted",
         name="Left wheel lifted",
         section="sensors",
@@ -117,6 +119,7 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[OpenNeatoBinarySensorEntityDescription, ...] =
     ),
     OpenNeatoBinarySensorEntityDescription(
         key="sensors_right_wheel_extended",
+        entity_registry_enabled_default=False,
         translation_key="right_wheel_lifted",
         name="Right wheel lifted",
         section="sensors",
@@ -127,6 +130,7 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[OpenNeatoBinarySensorEntityDescription, ...] =
     ),
     OpenNeatoBinarySensorEntityDescription(
         key="sensors_dc_jack_in",
+        entity_registry_enabled_default=False,
         translation_key="dock_contact",
         # dcJackIn is the robot's own DC barrel jack, NOT the charging dock:
         # measured False while docked with 18.9 V of external power present.

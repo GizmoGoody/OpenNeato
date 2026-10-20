@@ -139,6 +139,7 @@ SWITCH_DESCRIPTIONS: tuple[OpenNeatoSwitchEntityDescription, ...] = (
     OpenNeatoSwitchEntityDescription(
         key="notify_on_start",
         bridge=True,
+        entity_registry_enabled_default=False,
         translation_key="notify_on_start",
         name="Notify on clean start",
         section="settings",
@@ -150,6 +151,7 @@ SWITCH_DESCRIPTIONS: tuple[OpenNeatoSwitchEntityDescription, ...] = (
     OpenNeatoSwitchEntityDescription(
         key="notify_on_done",
         bridge=True,
+        entity_registry_enabled_default=False,
         translation_key="notify_on_done",
         name="Notify on clean done",
         section="settings",
@@ -161,6 +163,7 @@ SWITCH_DESCRIPTIONS: tuple[OpenNeatoSwitchEntityDescription, ...] = (
     OpenNeatoSwitchEntityDescription(
         key="notify_on_error",
         bridge=True,
+        entity_registry_enabled_default=False,
         translation_key="notify_on_error",
         name="Notify on error",
         section="settings",
@@ -172,6 +175,7 @@ SWITCH_DESCRIPTIONS: tuple[OpenNeatoSwitchEntityDescription, ...] = (
     OpenNeatoSwitchEntityDescription(
         key="notify_on_alert",
         bridge=True,
+        entity_registry_enabled_default=False,
         translation_key="notify_on_alert",
         name="Notify on alert",
         section="settings",
@@ -183,6 +187,7 @@ SWITCH_DESCRIPTIONS: tuple[OpenNeatoSwitchEntityDescription, ...] = (
     OpenNeatoSwitchEntityDescription(
         key="notify_on_docking",
         bridge=True,
+        entity_registry_enabled_default=False,
         translation_key="notify_on_docking",
         name="Notify on docking",
         section="settings",
@@ -194,6 +199,7 @@ SWITCH_DESCRIPTIONS: tuple[OpenNeatoSwitchEntityDescription, ...] = (
     OpenNeatoSwitchEntityDescription(
         key="ap_fallback_on_disconnect",
         bridge=True,
+        entity_registry_enabled_default=False,
         translation_key="ap_fallback_on_disconnect",
         name="WiFi AP fallback",
         section="settings",
@@ -205,6 +211,7 @@ SWITCH_DESCRIPTIONS: tuple[OpenNeatoSwitchEntityDescription, ...] = (
     OpenNeatoSwitchEntityDescription(
         key="remote_syslog",
         bridge=True,
+        entity_registry_enabled_default=False,
         translation_key="remote_syslog",
         name="Remote syslog",
         section="settings",
@@ -216,6 +223,7 @@ SWITCH_DESCRIPTIONS: tuple[OpenNeatoSwitchEntityDescription, ...] = (
     OpenNeatoSwitchEntityDescription(
         key="auto_restart",
         bridge=True,
+        entity_registry_enabled_default=False,
         translation_key="auto_restart",
         name="Daily auto restart",
         section="settings",
@@ -237,6 +245,7 @@ SWITCH_DESCRIPTIONS: tuple[OpenNeatoSwitchEntityDescription, ...] = (
         field=slot_fields(day_index, slot)["on"],
         settings_field=slot_fields(day_index, slot)["on"],
         icon="mdi:calendar-check",
+        entity_registry_enabled_default=False,
         entity_category=EntityCategory.CONFIG,
     )
     for day_index, day_key, day_name in SCHED_DAYS

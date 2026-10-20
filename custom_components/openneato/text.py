@@ -34,6 +34,7 @@ TEXT_DESCRIPTIONS: tuple[OpenNeatoTextEntityDescription, ...] = (
     OpenNeatoTextEntityDescription(
         key="syslog_ip",
         bridge=True,
+        entity_registry_enabled_default=False,
         translation_key="syslog_ip",
         name="Syslog server IP",
         section="settings",
@@ -47,6 +48,7 @@ TEXT_DESCRIPTIONS: tuple[OpenNeatoTextEntityDescription, ...] = (
     OpenNeatoTextEntityDescription(
         key="ntfy_topic",
         bridge=True,
+        entity_registry_enabled_default=False,
         translation_key="ntfy_topic",
         name="Notification topic",
         section="settings",
@@ -57,6 +59,7 @@ TEXT_DESCRIPTIONS: tuple[OpenNeatoTextEntityDescription, ...] = (
     OpenNeatoTextEntityDescription(
         key="ntfy_server",
         bridge=True,
+        entity_registry_enabled_default=False,
         translation_key="ntfy_server",
         name="Notification server",
         section="settings",
@@ -67,6 +70,7 @@ TEXT_DESCRIPTIONS: tuple[OpenNeatoTextEntityDescription, ...] = (
     OpenNeatoTextEntityDescription(
         key="ntfy_token",
         bridge=True,
+        entity_registry_enabled_default=False,
         translation_key="ntfy_token",
         name="Notification token",
         section="settings",
